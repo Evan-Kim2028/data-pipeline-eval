@@ -5,9 +5,9 @@ from warehouse.gold.sink import MemorySink
 
 
 class Scan:
-    def __init__(self, n: int) -> None:
+    def __init__(self, n: int, calls: list[str] | None = None) -> None:
         self._n = n
-        self.calls: list[str] = []
+        self.calls = calls if calls is not None else []
 
     def unique(self, **kwargs):
         self.calls.append("unique")
@@ -15,7 +15,7 @@ class Scan:
 
     def limit(self, n: int):
         self.calls.append("limit")
-        return Scan(min(self._n, n))
+        return Scan(min(self._n, n), self.calls)
 
     def collect(self, **kwargs):
         self.calls.append("collect")
@@ -27,3 +27,5 @@ def test_streaming_probe_does_not_unique(monkeypatch) -> None:
     scan = Scan(12)
     assert merge_delta(scan, MemorySink()) == "merged"
     assert "unique" not in scan.calls
+    assert scan.calls[0] == "limit"
+    assert "collect" in scan.calls
