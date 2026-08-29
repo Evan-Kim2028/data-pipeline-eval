@@ -1,11 +1,10 @@
-Incident:
+An event-time window was closed when processing_at passed the
+window end.
 
-An event-time window was closed when processing_at passed the window
-end. A fact with event_at inside the window arrived the next day and
-was dropped. Late facts still belong to the event-time window.
+A fact with event_at inside the window arrived the next day and
+was dropped. Late facts never joined that window. Daily totals
+came in short.
 
-The checkout is warehouse/. Tests call
-warehouse.jobs.event_window.facts_in_window. Membership is event_at,
-not processing_at.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+The next day's processing still excluded the fact because the
+window had already closed on processing time. Ops thought the
+window was event-time. The close was processing-time.

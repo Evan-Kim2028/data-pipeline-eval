@@ -1,10 +1,9 @@
-Incident:
+A rebuild retried after a mid-chunk crash.
 
-A rebuild retried after a mid-chunk crash. Staging checkpoints were
-cleared at the start of the retry, so the job rewrote from record
-one and double-applied the prefix that had already landed.
+Staging checkpoints were cleared at the start of the retry, so
+the job rewrote from record one. The prefix that had already
+landed was applied again.
 
-The checkout is warehouse/. Tests call warehouse.jobs.rebuild.resume.
-last_ok must survive the retry; the next chunk is last_ok + 1.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+Gold now has duplicate rows for that prefix. Counts jumped on
+the second pass. I stopped the retry loop after I saw the
+duplicates in the output.

@@ -1,10 +1,9 @@
-Incident:
+A serving rebuild crashed after writing the newest chunk.
 
-A serving rebuild crashed after writing the newest chunk. The next
-run compared pending inputs to the output file's mtime, treated older
-unread files as already consumed, and served a hole.
+The next run compared pending inputs to the output file's mtime.
+Older unread files looked already consumed. Those files never
+made it into the rebuilt output.
 
-The checkout is warehouse/. Tests call warehouse.jobs.cursors.unread.
-Pending is the set of names not yet processed, not mtime vs output.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+Serving had a hole. Users looking up entities from the skipped
+files got misses. The output mtime was new, so later runs kept
+skipping the same unread files.

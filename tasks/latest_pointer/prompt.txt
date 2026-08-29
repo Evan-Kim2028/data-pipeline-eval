@@ -1,12 +1,10 @@
-Incident:
+history-backfill of 90 days, newest partition to oldest.
 
-A 90-day history backfill wrote one partition per day, newest to
-oldest. The job also refreshed a "latest" pointer on every
-iteration so serving would not see a hole. It finished green.
-Serving then treated the oldest day as today; as-of lookups 404'd.
+The job also refreshed a latest pointer on every iteration so
+serving would not see a hole while days were still landing. It
+finished green.
 
-The checkout is warehouse/. Daily publish already seeded latest = today.
-Backfill must write day partitions and must not point latest at a
-historical day.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+Serving then treated the oldest day as today. As-of lookups for
+recent dates 404'd. Users hitting today got pages from 90 days
+ago. Ops signed off on a green backfill and only noticed when
+support tickets piled up around noon.

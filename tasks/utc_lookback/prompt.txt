@@ -1,10 +1,10 @@
-Incident (calibration):
-
 A gold job computed a 90-day lookback with the host's local
-date.today(). The warehouse date is UTC. Around midnight the local
-calendar and UTC disagree by a day.
+calendar date. The warehouse clock is UTC.
 
-The checkout is warehouse/. Anchor the window on the current UTC date.
-Non-positive days => 1.
+Around midnight the local calendar and UTC disagree by a day.
+The window started a day early or a day late depending on the
+host offset.
 
-Return a unified diff against warehouse/. Do not rewrite tests.
+Overnight runs skipped a UTC day or double-counted one.
+Analysts saw a missing or extra day at the lookback edge after
+the 00:00 slot.

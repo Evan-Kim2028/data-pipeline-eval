@@ -1,11 +1,10 @@
-Incident:
+Partition overwrite wrote day=2026-08-01.
 
-A partition overwrite wrote day=2026-08-01, then the read path walked
-the whole bronze tree and mixed other days into the result. Downstream
-rolled up a union of partitions as if it were one day.
+The read path then walked the whole bronze tree and mixed other
+days into the result. Downstream rolled up a union of partitions
+as if it were one day.
 
-The checkout is warehouse/. Tests call
-warehouse.jobs.partition_io.overwrite_day. A day read must return only
-that day's rows.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+Daily totals for the 1st were inflated by every other partition
+sitting in bronze. Analysts flagged the 1st as an outlier around
+14:00. The write itself looked fine. The day file on disk has
+only the 1st. The read is what mixed the rest in.
