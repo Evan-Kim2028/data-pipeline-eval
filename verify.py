@@ -16,8 +16,9 @@ import tempfile
 from pathlib import Path
 
 from catalog import all_ids, spec, validate_catalog
-from checkouts import materialize
+from checkouts import materialize, write_checkout
 from contracts import python_version_pin
+from patches import apply_patch
 
 ROOT = Path(__file__).resolve().parent
 WAREHOUSE = ROOT / "warehouse"
@@ -74,11 +75,37 @@ def main() -> int:
         action="store_true",
         help="Validate TaskSpec records and materialize checkouts only.",
     )
+    ap.add_argument(
+        "--check-patch",
+        nargs=2,
+        metavar=("TASK", "RESPONSE"),
+        help="Validate and apply a candidate unified diff. No pytest.",
+    )
     args = ap.parse_args()
     pin = python_version_pin(ROOT)
     running = sys.version_info[:3]
     if running != pin:
         print(f"WARN python {running} != pin {pin}", file=sys.stderr)
+    if args.check_patch:
+        task_id, response_path = args.check_patch
+        raw = Path(response_path).read_bytes()
+        checkout = materialize(spec(task_id), ROOT)
+        tmp = Path(tempfile.mkdtemp()) / "wh"
+        write_checkout(checkout, tmp)
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=tmp, check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=eval@local", "-c", "user.name=eval", "commit", "-qm", "seed"],
+            cwd=tmp,
+            check=True,
+        )
+        report = apply_patch(tmp, spec(task_id), raw)
+        shutil.rmtree(tmp.parent, ignore_errors=True)
+        if report.failure is None:
+            print(f"applied {task_id} {' '.join(report.changed_paths)}")
+            return 0
+        print(f"{report.failure.code} {report.failure.diagnostic}")
+        return 1
     catalog_rc = _validate_catalog()
     if args.validate_catalog:
         return catalog_rc

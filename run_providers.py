@@ -10,10 +10,8 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -26,8 +24,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids
+from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
 from contracts import environment_digest, git_revision
+from patches import apply_patch
 from prompt_bundle import all_bundles, bundle_for
 from quality import classify
 
@@ -98,208 +97,6 @@ def _message_text(msg: dict) -> str:
         if isinstance(val, str) and val.strip():
             return val
     return ""
-
-
-def _extract_python_or_diff(text: str) -> str:
-    if not text:
-        raise RuntimeError("empty model content")
-    blocks = re.findall(r"```(?:diff|patch|python)?\n(.*?)```", text, re.DOTALL)
-    if blocks:
-        return blocks[0]
-    return text
-
-
-def _reset_work(work: Path) -> None:
-    subprocess.run(["git", "checkout", "-q", "--", "."], cwd=work, check=True)
-    subprocess.run(["git", "clean", "-qfd"], cwd=work, check=True)
-
-
-def _changed_paths(work: Path) -> list[Path]:
-    proc = subprocess.run(
-        ["git", "diff", "--name-only"],
-        cwd=work,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return [work / line for line in proc.stdout.splitlines() if line]
-
-
-def _parse_changed_py(work: Path) -> str | None:
-    changed = _changed_paths(work)
-    if not changed:
-        return "apply changed no files"
-    for path in changed:
-        if path.suffix != ".py":
-            continue
-        rel = path.relative_to(work).as_posix()
-        try:
-            src = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            return f"{rel}: not utf-8 ({exc.reason})"
-        try:
-            ast.parse(src)
-        except SyntaxError as exc:
-            return f"{rel}:{exc.lineno} {exc.msg}"
-    return None
-
-
-def _find_line(old: list[str], oi: int, needle: str, window: int = 80) -> int | None:
-    for k in range(oi, min(len(old), oi + window)):
-        if old[k] == needle:
-            return k
-    stripped = needle.strip()
-    if stripped:
-        for k in range(oi, min(len(old), oi + window)):
-            if old[k].strip() == stripped:
-                return k
-    return None
-
-
-def _apply_hunk_lines(old: list[str], hunk_lines: list[str]) -> list[str]:
-    new: list[str] = []
-    oi = 0
-    for line in hunk_lines:
-        if line.startswith(("@@", "diff ", "index ")):
-            continue
-        if line.startswith("+++") or line.startswith("---"):
-            continue
-        if line.startswith("+"):
-            new.append(line[1:])
-            continue
-        if line.startswith("-"):
-            needle = line[1:]
-            if oi < len(old) and old[oi] == needle:
-                oi += 1
-                continue
-            found = _find_line(old, oi, needle)
-            if found is None:
-                raise RuntimeError(f"minus not found: {needle[:80]}")
-            new.extend(old[oi:found])
-            oi = found + 1
-            continue
-        ctx = line[1:] if line.startswith(" ") else line
-        if oi < len(old) and old[oi] == ctx:
-            new.append(old[oi])
-            oi += 1
-            continue
-        found = _find_line(old, oi, ctx)
-        if found is None:
-            raise RuntimeError(f"context not found: {ctx[:80]}")
-        new.extend(old[oi:found])
-        new.append(old[found])
-        oi = found + 1
-    new.extend(old[oi:])
-    return new
-
-
-def _apply_context_hunks(work: Path, blob: str) -> None:
-    applied = 0
-    parts = re.split(r"(?m)^--- ", blob)
-    for part in parts[1:]:
-        header, _, rest = part.partition("\n")
-        path = header.strip()
-        path = re.sub(r"^a/", "", path)
-        if rest.startswith("+++"):
-            plus, _, rest = rest.partition("\n")
-            alt = plus.replace("+++", "").strip()
-            alt = re.sub(r"^b/", "", alt)
-            if alt and alt != "/dev/null":
-                path = alt
-        target = work / path
-        if not target.is_file():
-            nested = work / "warehouse" / path.removeprefix("warehouse/")
-            if nested.is_file():
-                target = nested
-            else:
-                continue
-        old = target.read_text(encoding="utf-8").splitlines()
-        new = _apply_hunk_lines(old, rest.splitlines())
-        if new != old:
-            target.write_text("\n".join(new) + "\n")
-            applied += 1
-    if applied == 0:
-        raise RuntimeError("context patch changed no files")
-
-
-def _git_apply(work: Path, blob: str, extra: list[str]) -> bool:
-    proc = subprocess.run(
-        ["git", "apply", "--whitespace=nowarn", "--recount", *extra],
-        cwd=work,
-        input=blob.encode(),
-        capture_output=True,
-    )
-    return proc.returncode == 0
-
-
-def _split_file_diffs(blob: str) -> list[str]:
-    parts = re.split(r"(?m)(?=^--- )", blob)
-    return [p for p in parts if p.lstrip().startswith("--- ")]
-
-
-def _revert_new(work: Path, before: set[Path]) -> None:
-    for path in _changed_paths(work):
-        if path in before:
-            continue
-        rel = path.relative_to(work).as_posix()
-        subprocess.run(["git", "checkout", "-q", "--", rel], cwd=work, check=False)
-
-
-def _try_blob(work: Path, blob: str) -> str | None:
-    before = set(_changed_paths(work))
-    for extra in (["-p0"], ["-p1"], ["-p2"]):
-        if _git_apply(work, blob, extra):
-            err = _parse_changed_py(work)
-            if err is None:
-                return None
-            _revert_new(work, before)
-    try:
-        _apply_context_hunks(work, blob)
-    except Exception as exc:
-        _revert_new(work, before)
-        return str(exc)
-    err = _parse_changed_py(work)
-    if err is None:
-        return None
-    _revert_new(work, before)
-    return err
-
-
-def _apply_model_output(work: Path, raw: str) -> None:
-    blob = _extract_python_or_diff(raw)
-    stripped = blob.lstrip()
-    if not stripped.startswith(("diff ", "--- ", "+++ ")):
-        raise RuntimeError("apply_fail: model output was not a unified diff")
-    try:
-        _apply_model_output_inner(work, blob)
-    except UnicodeDecodeError as exc:
-        _reset_work(work)
-        raise RuntimeError(f"apply_fail:utf-8: {exc}") from exc
-
-
-def _apply_model_output_inner(work: Path, blob: str) -> None:
-    last = "apply_fail"
-    for extra in (["-p0"], ["-p1"], ["-p2"]):
-        _reset_work(work)
-        if not _git_apply(work, blob, extra):
-            last = f"apply_fail:git {extra[0]}"
-            continue
-        err = _parse_changed_py(work)
-        if err is None:
-            return
-        last = f"apply_fail:git {extra[0]}: {err}"
-    _reset_work(work)
-    n_ok = 0
-    for chunk in _split_file_diffs(blob) or [blob]:
-        err = _try_blob(work, chunk)
-        if err is None:
-            n_ok += 1
-        else:
-            last = f"apply_fail:file: {err}"
-    if n_ok and _parse_changed_py(work) is None:
-        return
-    _reset_work(work)
-    raise RuntimeError(last)
 
 
 def _delta_piece(delta: dict) -> tuple[str, str]:
@@ -580,7 +377,14 @@ def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_
             with SPEND_LOCK:
                 spend[0] += float(meta["cost"])
         _out(f"  {task}/{provider}  applying patch ({meta.get('content_chars', 0)}c)")
-        _apply_model_output(tmp, raw)
+        report = apply_patch(tmp, spec(task), raw.encode() if isinstance(raw, str) else raw)
+        row["patch_status"] = report.status
+        row["patch_sha256"] = report.response_sha256
+        if report.failure is not None:
+            row["error"] = str(report.failure)
+            row["quality"] = report.failure.code
+            _out(f"  {task}/{provider}  {report.failure.code}")
+            raise RuntimeError(str(report.failure))
         row.update(classify(task, tmp))
         _out(f"  {task}/{provider}  pytest shown")
         shown_ok, shown_out = _pytest(tmp, tests)

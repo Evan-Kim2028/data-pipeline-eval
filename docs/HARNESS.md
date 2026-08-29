@@ -42,10 +42,13 @@ After apply, `quality.py` tags the tree
 `gold` (byte-match fault files to the gold warehouse, no extra files),
 `equivalent` (only those files changed), or `other`.
 
-Apply is strict: `git apply --recount`, then a per-file context hunk
-walk (a bad extra file does not kill a good fault-file hunk). Changed
-`.py` must `ast.parse` as UTF-8. A smashed tree is reverted and scored
-`apply_fail`. GNU `patch` is not used.
+Candidate responses must be one bare unified diff (`diff --git` plus
+matching `--- a/` / `+++ b/` headers). Apply is exactly
+`git apply --index --whitespace=error -p1` onto disclosed editable
+paths. Format, policy, and apply failures are distinct. Fences, fuzz,
+`--recount`, and context replacement are not used.
+`python verify.py --check-patch TASK RESPONSE` checks a patch without
+running candidate code.
 
 `--jobs` runs (task, host) pairs in parallel (default `min(8, n_pairs)`).
 One in-flight request per host. HTTP 429 retries with backoff.
