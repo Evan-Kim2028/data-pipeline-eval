@@ -1,0 +1,15 @@
+diff --git a/warehouse/time/lookback.py b/warehouse/time/lookback.py
+--- a/warehouse/time/lookback.py
++++ b/warehouse/time/lookback.py
+@@ -1,9 +1,9 @@
+ from __future__ import annotations
+ 
+-from datetime import timedelta
++from datetime import date, timedelta
+ 
+ from warehouse.time.clock import local_today
+ 
+ 
+ def lookback_since(days: int):
+-    return local_today() - timedelta(days=max(days, 1))
++    return date.today() - timedelta(days=max(days, 1))
