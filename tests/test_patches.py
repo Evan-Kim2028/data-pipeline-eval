@@ -69,11 +69,23 @@ def test_format_failures():
         raise AssertionError("expected failure")
     except Exception as exc:
         assert getattr(exc, "code", None) == INVALID_PATCH_FORMAT
+    work = _seed("timestamptz_cutoff")
+    report = apply_patch(work, task, fenced)
+    assert report.status == "applied"
     try:
         parse_unified_diff(b"please fix the file\n", allowed)
         raise AssertionError("expected failure")
     except Exception as exc:
         assert getattr(exc, "code", None) == INVALID_PATCH_FORMAT
+
+
+def test_python_fence_then_diff_fence_applies_diff():
+    task = spec("timestamptz_cutoff")
+    gold = _git_diff("timestamptz_cutoff")
+    raw = b"```python\nprint('diagnosis')\n```\n```diff\n" + gold + b"```\n"
+    work = _seed("timestamptz_cutoff")
+    report = apply_patch(work, task, raw)
+    assert report.status == "applied"
 
 
 def test_policy_and_apply_failures():

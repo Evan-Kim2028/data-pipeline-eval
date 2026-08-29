@@ -32,7 +32,7 @@ from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
 from contracts import SCHEMA_VERSION, ResponseArtifact, encode_json, environment_digest, git_revision
 from patches import apply_patch
 from prompt_bundle import all_bundles, bundle_for
-from quality import classify
+from quality import classify, tag_quality
 from sandbox import image_lock
 from trial_store import SpendEvent, TrialStore
 
@@ -119,22 +119,171 @@ def _message_text(msg: dict) -> str:
 
 
 def _delta_piece(delta: dict) -> tuple[str, str]:
-    reason: list[str] = []
-    for key in ("reasoning", "reasoning_content"):
-        val = delta.get(key)
-        if isinstance(val, str) and val:
-            reason.append(val)
+    reason = ""
     details = delta.get("reasoning_details")
     if isinstance(details, list):
+        bits: list[str] = []
         for item in details:
             if isinstance(item, dict):
                 bit = item.get("text") or item.get("content") or ""
                 if bit:
-                    reason.append(str(bit))
+                    bits.append(str(bit))
+        if bits:
+            reason = "".join(bits)
+    if not reason:
+        for key in ("reasoning", "reasoning_content"):
+            val = delta.get(key)
+            if isinstance(val, str) and val:
+                reason = val
+                break
     content = delta.get("content")
     if not isinstance(content, str):
         content = ""
-    return "".join(reason), content
+    return reason, content
+
+
+TRIAL_ROW_KEYS = (
+    "schema_version",
+    "run_id",
+    "campaign_id",
+    "trial_id",
+    "trial",
+    "k",
+    "task",
+    "provider",
+    "provider_name",
+    "model",
+    "temperature",
+    "max_tokens",
+    "reasoning_effort",
+    "prompt_sha256",
+    "benchmark_repo_sha",
+    "environment_sha256",
+    "comparable",
+    "jobs",
+    "ts",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "reasoning_tokens",
+    "cached_tokens",
+    "cache_write_tokens",
+    "cost",
+    "cost_prompt",
+    "cost_completion",
+    "latency_s",
+    "finish_reason",
+    "id",
+    "content_chars",
+    "reasoning_chars",
+    "raw_path",
+    "stream",
+    "tool_calls",
+    "patch_status",
+    "patch_sha256",
+    "applied_diff_path",
+    "applied_sha256",
+    "quality",
+    "changed",
+    "extra",
+    "fault_files",
+    "files_changed_n",
+    "lines_added",
+    "lines_deleted",
+    "pass",
+    "pass_shown",
+    "pass_held",
+    "pytest",
+    "error",
+)
+
+
+def usage_from_openrouter(usage: dict | None) -> dict:
+    usage = usage or {}
+    pdet = usage.get("prompt_tokens_details")
+    cdet = usage.get("completion_tokens_details")
+    cost_det = usage.get("cost_details")
+    pdet = pdet if isinstance(pdet, dict) else {}
+    cdet = cdet if isinstance(cdet, dict) else {}
+    cost_det = cost_det if isinstance(cost_det, dict) else {}
+    cost = usage.get("cost")
+    return {
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "total_tokens": usage.get("total_tokens"),
+        "cached_tokens": pdet.get("cached_tokens"),
+        "cache_write_tokens": pdet.get("cache_write_tokens"),
+        "reasoning_tokens": cdet.get("reasoning_tokens"),
+        "cost": cost if isinstance(cost, (int, float)) else None,
+        "cost_prompt": cost_det.get("upstream_inference_prompt_cost"),
+        "cost_completion": cost_det.get("upstream_inference_completions_cost"),
+    }
+
+
+def _trial_id(run_id: str, task: str, trial: int, provider: str) -> str:
+    return f"{run_id}:{task}:r{trial}:{provider}"
+
+
+def _base_row(task: str, provider: str, trial: int, run_meta: dict) -> dict:
+    row = {key: None for key in TRIAL_ROW_KEYS}
+    row.update(
+        {
+            "schema_version": run_meta.get("schema_version"),
+            "run_id": run_meta.get("run_id"),
+            "campaign_id": run_meta.get("campaign_id"),
+            "trial_id": _trial_id(str(run_meta.get("run_id") or ""), task, trial, provider),
+            "trial": trial,
+            "k": run_meta.get("k"),
+            "task": task,
+            "provider": provider,
+            "model": run_meta.get("model"),
+            "temperature": run_meta.get("temperature"),
+            "max_tokens": run_meta.get("max_tokens"),
+            "reasoning_effort": run_meta.get("reasoning_effort"),
+            "benchmark_repo_sha": run_meta.get("benchmark_repo_sha"),
+            "environment_sha256": run_meta.get("environment_sha256"),
+            "comparable": run_meta.get("comparable"),
+            "jobs": run_meta.get("jobs"),
+            "ts": run_meta.get("ts"),
+            "pass": False,
+            "tool_calls": 0,
+            "changed": [],
+            "extra": [],
+            "fault_files": [],
+            "pytest": [],
+        }
+    )
+    return row
+
+
+def _freeze_row(row: dict) -> dict:
+    frozen = {key: row.get(key) for key in TRIAL_ROW_KEYS}
+    extra = {key: value for key, value in row.items() if key not in frozen}
+    frozen.update(extra)
+    return frozen
+
+
+def _diff_stats(blob: bytes) -> tuple[int, int, int]:
+    files = plus = minus = 0
+    for line in blob.decode("utf-8", "replace").splitlines():
+        if line.startswith("diff --git "):
+            files += 1
+        elif line.startswith(("+++", "---")):
+            continue
+        elif line.startswith("+"):
+            plus += 1
+        elif line.startswith("-"):
+            minus += 1
+    return files, plus, minus
+
+
+def _save_applied_diff(run_id: str, task: str, provider: str, trial: int, work: Path) -> tuple[str, str, bytes]:
+    blob = subprocess.check_output(["git", "diff", "--cached"], cwd=work)
+    directory = LOGS / "runs" / run_id / "patches"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{task}__{provider}__t{trial}.diff"
+    path.write_bytes(blob)
+    return str(path), hashlib.sha256(blob).hexdigest(), blob
 
 
 def _out(msg: str) -> None:
@@ -272,30 +421,28 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
     _tick(task, provider, t0, "done", len(reasoning), len(content), finish_reason or "")
     LOGS.mkdir(parents=True, exist_ok=True)
     raw_path = LOGS / f"raw-{task}-{provider}-{gen_id}.json"
-    raw_path.write_text(
-        json.dumps(
-            {
-                "choice": {
-                    "finish_reason": finish_reason,
-                    "message": {"content": content, "reasoning": reasoning[:80_000]},
-                },
-                "usage": usage,
+    dumped = json.dumps(
+        {
+            "usage": usage,
+            "choice": {
+                "finish_reason": finish_reason,
+                "message": {"content": content, "reasoning": reasoning[:80_000]},
             },
-            indent=2,
-        )[:200_000]
+        },
+        indent=2,
     )
+    raw_path.write_text(dumped[:200_000])
     meta = {
         "provider": host,
         "latency_s": round(latency_s, 3),
-        "prompt_tokens": usage.get("prompt_tokens"),
-        "completion_tokens": usage.get("completion_tokens"),
-        "cost": usage.get("cost") if isinstance(usage.get("cost"), (int, float)) else None,
+        **usage_from_openrouter(usage),
         "id": gen_id,
         "finish_reason": finish_reason,
         "content_chars": len(content),
         "reasoning_chars": len(reasoning),
         "raw_path": str(raw_path),
         "stream": True,
+        "tool_calls": 0,
     }
     if not text:
         raise RuntimeError(f"empty content finish_reason={finish_reason}")
@@ -337,49 +484,76 @@ def _append_jsonl(path: Path, row: dict) -> None:
         fh.write(json.dumps(row) + "\n")
 
 
-def _write_last_run(run_id: str, rows: list[dict], spend: float) -> None:
+def _sort_rows(rows: list[dict], tasks: tuple[str, ...]) -> list[dict]:
+    order = {task: i for i, task in enumerate(tasks)}
+    return sorted(
+        rows,
+        key=lambda r: (
+            order.get(str(r.get("task") or ""), 999),
+            str(r.get("provider") or ""),
+            int(r.get("trial") or 1),
+        ),
+    )
+
+
+def _write_last_run(run_meta: dict, rows: list[dict], spend: float) -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
+    run_id = str(run_meta.get("run_id") or "")
     last = [
         f"# {run_id}",
         "",
-        f"model `{MODEL}`  effort `{REASONING_EFFORT}`  temp `{TEMPERATURE}`  "
+        f"model `{run_meta.get('model')}`  effort `{run_meta.get('reasoning_effort')}`  "
+        f"temp `{run_meta.get('temperature')}`  k `{run_meta.get('k')}`  "
+        f"comparable `{run_meta.get('comparable')}`  sha `{run_meta.get('benchmark_repo_sha')}`  "
         f"spend~${spend:.4f}",
         "",
-        "| task | provider | pass | latency_s | prompt | completion | cost | error |",
-        "|---|---|---|---|---|---|---|---|",
+        "| task | provider | trial | pass | quality | shown | held | latency_s | prompt | completion | reason_tok | cached | cost | files | +ln | -ln | error |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         err = (r.get("error") or "").replace("|", " ")
         last.append(
-            f"| {r.get('task')} | {r.get('provider')} | {r.get('pass')} | "
-            f"{r.get('latency_s', '')} | {r.get('prompt_tokens', '')} | "
-            f"{r.get('completion_tokens', '')} | {r.get('cost', '')} | {err} |"
+            f"| {r.get('task')} | {r.get('provider')} | {r.get('trial')} | "
+            f"{r.get('pass')} | {r.get('quality') or ''} | {r.get('pass_shown')} | "
+            f"{r.get('pass_held')} | {r.get('latency_s', '')} | {r.get('prompt_tokens', '')} | "
+            f"{r.get('completion_tokens', '')} | {r.get('reasoning_tokens', '')} | "
+            f"{r.get('cached_tokens', '')} | {r.get('cost', '')} | "
+            f"{r.get('files_changed_n', '')} | {r.get('lines_added', '')} | "
+            f"{r.get('lines_deleted', '')} | {err} |"
         )
-    (LOGS / "LAST_RUN.md").write_text("\n".join(last) + "\n")
+    text = "\n".join(last) + "\n"
+    (LOGS / "LAST_RUN.md").write_text(text)
+    archive = LOGS / "runs" / run_id
+    archive.mkdir(parents=True, exist_ok=True)
+    (archive / "LAST_RUN.md").write_text(text)
 
 
 def _record(run_meta: dict, all_rows: list[dict], spend: list[float], row: dict) -> None:
+    frozen = _freeze_row(row)
     with LOG_LOCK:
-        all_rows.append(row)
-        _append_jsonl(ROOT / "results.jsonl", row)
-        _append_jsonl(LOGS / "runs" / f"{run_meta['run_id']}.jsonl", row)
+        all_rows.append(frozen)
+        _append_jsonl(ROOT / "results.jsonl", frozen)
+        _append_jsonl(LOGS / "runs" / f"{run_meta['run_id']}.jsonl", frozen)
         with SPEND_LOCK:
             spent = spend[0]
-        _write_last_run(run_meta["run_id"], list(all_rows), spent)
+        _write_last_run(run_meta, list(all_rows), spent)
 
 
-def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_rows: list[dict]) -> dict:
+def _run_pair(
+    task: str, provider: str, trial: int, spend: list[float], run_meta: dict, all_rows: list[dict]
+) -> dict:
     with SPEND_LOCK:
         over = spend[0] >= MAX_SPEND_USD
     if over:
-        row = {"task": task, "provider": provider, "pass": False, "error": "spend cap", **run_meta}
+        row = _base_row(task, provider, trial, run_meta)
+        row["error"] = "spend cap"
         _record(run_meta, all_rows, spend, row)
-        _out(f"FAIL {task:22} {provider:14} spend cap")
+        _out(f"FAIL {task:22} {provider:14} t{trial} spend cap")
         return row
-    row: dict = {"task": task, "provider": provider, "pass": False, **run_meta}
+    row = _base_row(task, provider, trial, run_meta)
     tmp = None
     try:
-        _out(f">> {task}  {provider}  seeding checkout")
+        _out(f">> {task}  {provider}  t{trial}  seeding checkout")
         tmp = _seed_tree(task)
         tests = ROOT / "tasks" / task / "tests"
         held = ROOT / "tasks" / task / "tests_adjudication"
@@ -398,28 +572,37 @@ def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_
         if meta.get("cost"):
             with SPEND_LOCK:
                 spend[0] += float(meta["cost"])
-        _out(f"  {task}/{provider}  applying patch ({meta.get('content_chars', 0)}c)")
+        _out(f"  {task}/{provider}  t{trial}  applying patch ({meta.get('content_chars', 0)}c)")
         report = apply_patch(tmp, spec(task), raw.encode() if isinstance(raw, str) else raw)
         row["patch_status"] = report.status
         row["patch_sha256"] = report.response_sha256
         if report.failure is not None:
             row["error"] = str(report.failure)
             row["quality"] = report.failure.code
-            _out(f"  {task}/{provider}  {report.failure.code}")
+            _out(f"  {task}/{provider}  t{trial}  {report.failure.code}")
             raise RuntimeError(str(report.failure))
-        row.update(classify(task, tmp))
-        _out(f"  {task}/{provider}  pytest shown")
+        changed = set(report.changed_paths)
+        row.update(classify(task, tmp, changed=changed))
+        diff_path, diff_sha, diff_blob = _save_applied_diff(
+            str(run_meta["run_id"]), task, provider, trial, tmp
+        )
+        row["applied_diff_path"] = diff_path
+        row["applied_sha256"] = diff_sha
+        files_n, plus, minus = _diff_stats(diff_blob)
+        row["files_changed_n"] = files_n
+        row["lines_added"] = plus
+        row["lines_deleted"] = minus
+        _out(f"  {task}/{provider}  t{trial}  pytest shown")
         shown_ok, shown_out = _pytest(tmp, tests)
         held_ok, held_out = True, ""
         if held.is_dir() and any(held.glob("test_*.py")):
-            _out(f"  {task}/{provider}  pytest held-out")
+            _out(f"  {task}/{provider}  t{trial}  pytest held-out")
             held_ok, held_out = _pytest(tmp, held)
         row["pass_shown"] = shown_ok
         row["pass_held"] = held_ok
         ok = shown_ok and held_ok
         row["pass"] = ok
-        if not shown_ok:
-            row["quality"] = "broken"
+        row["quality"] = tag_quality(str(row.get("quality") or "other"), shown_ok, held_ok)
         row["pytest"] = (shown_out + "\n" + held_out).splitlines()[-12:]
         if not ok:
             blob = held_out if shown_ok and not held_ok else shown_out
@@ -431,42 +614,45 @@ def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_
             if shown_ok and not held_ok:
                 fail_line = "held-out: " + fail_line
             row["error"] = fail_line[:400]
-            _out(f"  {task}/{provider}  pytest fail")
+            _out(f"  {task}/{provider}  t{trial}  pytest fail")
             for ln in lines[-6:]:
                 _out(f"    {ln}")
     except Exception as exc:
         row["error"] = str(exc)[:400]
-        if str(exc).startswith("apply_fail"):
-            row["quality"] = "apply_fail"
-        _out(f"  {task}/{provider}  error: {row['error']}")
+        _out(f"  {task}/{provider}  t{trial}  error: {row['error']}")
     finally:
         if tmp is not None:
             shutil.rmtree(tmp.parent, ignore_errors=True)
     _record(run_meta, all_rows, spend, row)
     q = row.get("quality") or ""
     _out(
-        f"{'PASS' if row.get('pass') else 'FAIL':4} {task:22} {provider:14} "
+        f"{'PASS' if row.get('pass') else 'FAIL':4} {task:22} {provider:14} t{trial} "
         f"{q:11} {row.get('latency_s', '')}s  ${row.get('cost') or 0}  {row.get('error') or ''}"
     )
     return row
 
 
 def _summary(rows: list[dict], providers: list[str], tasks: tuple[str, ...]) -> None:
-    grid = {(r["task"], str(r.get("provider") or "").lower()): r for r in rows}
+    grid = {
+        (r["task"], str(r.get("provider") or "").lower(), int(r.get("trial") or 1)): r
+        for r in rows
+    }
+    trials = sorted({int(r.get("trial") or 1) for r in rows}) or [1]
     header = "task".ljust(22) + "".join(f"{p:16}" for p in providers)
     _out("\n" + header)
     for task in tasks:
-        line = task.ljust(22)
-        for p in providers:
-            r = grid.get((task, p.lower()))
-            if r is None:
-                cell = "?"
-            elif r.get("pass"):
-                cell = f"PASS/{r.get('quality') or '?'}"
-            else:
-                cell = "FAIL"
-            line += f"{cell:16}"
-        _out(line)
+        for trial in trials:
+            label = task if len(trials) == 1 else f"{task}:t{trial}"
+            line = label.ljust(22)
+            for p in providers:
+                r = grid.get((task, p.lower(), trial))
+                if r is None:
+                    cell = "?"
+                else:
+                    mark = "PASS" if r.get("pass") else "FAIL"
+                    cell = f"{mark}/{r.get('quality') or '?'}"
+                line += f"{cell:16}"
+            _out(line)
     for p in providers:
         subset = [r for r in rows if str(r.get("provider") or "").lower() == p.lower()]
         _out(f"{p}: {sum(1 for r in subset if r.get('pass'))}/{len(subset)}")
@@ -657,11 +843,25 @@ def run_campaign(campaign: Campaign, results: Path) -> int:
             requested_provider=row.requested_provider,
             served_provider=served,
             generation_id=None if meta.get("id") == "unknown" else str(meta.get("id")),
-            usage={
-                "prompt_tokens": meta.get("prompt_tokens"),
-                "completion_tokens": meta.get("completion_tokens"),
-                "cost": cost if isinstance(cost, (int, float)) else None,
-            },
+            usage=usage_from_openrouter(
+                {
+                    "prompt_tokens": meta.get("prompt_tokens"),
+                    "completion_tokens": meta.get("completion_tokens"),
+                    "total_tokens": meta.get("total_tokens"),
+                    "prompt_tokens_details": {
+                        "cached_tokens": meta.get("cached_tokens"),
+                        "cache_write_tokens": meta.get("cache_write_tokens"),
+                    },
+                    "completion_tokens_details": {
+                        "reasoning_tokens": meta.get("reasoning_tokens"),
+                    },
+                    "cost": cost if isinstance(cost, (int, float)) else None,
+                    "cost_details": {
+                        "upstream_inference_prompt_cost": meta.get("cost_prompt"),
+                        "upstream_inference_completions_cost": meta.get("cost_completion"),
+                    },
+                }
+            ),
             finish_reason=meta.get("finish_reason"),
             benchmark_repo_sha=published,
             grader_source_sha=campaign.grader_source_sha,
@@ -711,6 +911,18 @@ def main() -> int:
         "--hard",
         action="store_true",
         help="All very_hard tasks on z-ai and novita.",
+    )
+    ap.add_argument(
+        "--variance",
+        action="store_true",
+        help="Original 9 very_hard tasks on z-ai and novita.",
+    )
+    ap.add_argument(
+        "-k",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Replicates per (task, host). Default 1.",
     )
     ap.add_argument("--providers", default=",".join(DEFAULT_PROVIDERS))
     ap.add_argument(
@@ -789,10 +1001,13 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    cheap = args.smoke or args.golden or args.hard
+    cheap = args.smoke or args.golden or args.hard or args.variance
+    if args.k < 1:
+        print("-k must be >= 1", file=sys.stderr)
+        return 2
     if args.task:
         tasks = tuple(args.task)
-    elif args.hard:
+    elif args.hard or args.variance:
         tasks = hard_ids()
     elif args.golden:
         tasks = GOLDEN_IDS
@@ -804,7 +1019,7 @@ def main() -> int:
         providers = ["z-ai", "novita"]
     else:
         providers = [p.strip() for p in args.providers.split(",") if p.strip()]
-    pairs = [(t, p) for t in tasks for p in providers]
+    pairs = [(t, p, trial) for t in tasks for p in providers for trial in range(1, args.k + 1)]
     jobs = args.jobs if args.jobs > 0 else min(DEFAULT_JOBS, max(1, len(pairs)))
     spend = [0.0]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -820,24 +1035,29 @@ def main() -> int:
         "max_tokens": MAX_TOKENS,
         "reasoning_effort": REASONING_EFFORT,
         "jobs": jobs,
+        "k": args.k,
         "benchmark_repo_sha": published,
         "environment_sha256": environment_digest(ROOT),
         "comparable": not dirty,
     }
     _out(
-        f"run {run_id}  {len(pairs)} pairs  jobs={jobs}  "
+        f"run {run_id}  {len(pairs)} pairs  jobs={jobs}  k={args.k}  "
         f"effort={REASONING_EFFORT}  temp={TEMPERATURE}"
     )
     rows: list[dict] = []
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         futs = [
-            pool.submit(_run_pair, task, provider, spend, run_meta, rows)
-            for task, provider in pairs
+            pool.submit(_run_pair, task, provider, trial, spend, run_meta, rows)
+            for task, provider, trial in pairs
         ]
         for fut in as_completed(futs):
             fut.result()
-    n_pass = sum(1 for r in rows if r.get("pass"))
+    rows[:] = _sort_rows(rows, tasks)
     run_path = LOGS / "runs" / f"{run_id}.jsonl"
+    run_path.parent.mkdir(parents=True, exist_ok=True)
+    run_path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    _write_last_run(run_meta, rows, spend[0])
+    n_pass = sum(1 for r in rows if r.get("pass"))
     _summary(rows, providers, tasks)
     _out(
         f"\n{n_pass}/{len(rows)} passed  spend~${spend[0]:.4f}  "

@@ -1,9 +1,9 @@
-"""Classify a patched tree: gold / equivalent / other.
+"""Classify a patched tree: gold / equivalent / other / held_fail / broken.
 
 gold: fault overlay files now match the gold warehouse, nothing else changed.
-equivalent: only those files changed, but the text is not byte-identical
-(documented "also green" patches).
+equivalent: only those files changed, but the text is not byte-identical.
 other: extra files changed.
+broken / held_fail: assigned after pytest, not here.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def fault_rels(task: str) -> set[str]:
 
 def changed_rels(work: Path) -> set[str]:
     proc = subprocess.run(
-        ["git", "diff", "--name-only"],
+        ["git", "diff", "--cached", "--name-only"],
         cwd=work,
         capture_output=True,
         text=True,
@@ -33,9 +33,18 @@ def changed_rels(work: Path) -> set[str]:
     return {line for line in proc.stdout.splitlines() if line and not line.startswith(".git")}
 
 
-def classify(task: str, work: Path) -> dict:
+def tag_quality(classified: str, shown_ok: bool, held_ok: bool) -> str:
+    if not shown_ok:
+        return "broken"
+    if not held_ok:
+        return "held_fail"
+    return classified
+
+
+def classify(task: str, work: Path, changed: set[str] | None = None) -> dict:
     fault = fault_rels(task)
-    changed = changed_rels(work)
+    if changed is None:
+        changed = changed_rels(work)
     extra = sorted(changed - fault)
     gold_match = True
     for rel in sorted(fault):

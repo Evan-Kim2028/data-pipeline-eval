@@ -35,6 +35,8 @@ _DENIED_PARTS = frozenset(
 _DIFF_GIT = re.compile(r"^diff --git a/(.+) b/(.+)$")
 _HEADER_A = re.compile(r"^--- a/(.+)$")
 _HEADER_B = re.compile(r"^\+\+\+ b/(.+)$")
+_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_DIFF_LANGS = frozenset({"diff", "patch", "udiff"})
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,133 @@ def _posix(path: str) -> str:
     if any(p in _DENIED_PARTS for p in parts):
         raise _fail(POLICY, PATCH_POLICY_REJECTED, f"denied path {path}")
     return path
+
+
+def _fence_blocks(text: str) -> list[tuple[str, str]]:
+    blocks: list[tuple[str, str]] = []
+    i = 0
+    while True:
+        start = text.find("```", i)
+        if start < 0:
+            break
+        nl = text.find("\n", start + 3)
+        if nl < 0:
+            break
+        lang = text[start + 3 : nl].strip().split()[0].lower() if text[start + 3 : nl].strip() else ""
+        end = text.find("```", nl + 1)
+        if end < 0:
+            break
+        blocks.append((lang, text[nl + 1 : end]))
+        i = end + 3
+    return blocks
+
+
+def _is_diff_body(body: str) -> bool:
+    stripped = body.lstrip("\n")
+    return stripped.startswith(("diff --git ", "--- a/"))
+
+
+def _strip_trailing_prose(text: str) -> str:
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    last = -1
+    for i, line in enumerate(lines):
+        if line.startswith(
+            ("diff --git ", "--- ", "+++ ", "@@", "+", "-", " ", "\\")
+        ) or line == "":
+            last = i
+    if last < 0:
+        return text if text.endswith("\n") else text + "\n"
+    return "\n".join(lines[: last + 1]) + "\n"
+
+
+def unwrap_candidate(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if "```" not in text:
+        return _strip_trailing_prose(text)
+    blocks = _fence_blocks(text)
+    if not blocks:
+        raise _fail(FORMAT, INVALID_PATCH_FORMAT, "markdown fence")
+    chosen = None
+    for lang, body in blocks:
+        if lang in _DIFF_LANGS or _is_diff_body(body):
+            chosen = body
+            break
+    if chosen is None:
+        raise _fail(FORMAT, INVALID_PATCH_FORMAT, "markdown fence")
+    return _strip_trailing_prose(chosen)
+
+
+def _old_side(hunk: list[str]) -> list[str]:
+    out: list[str] = []
+    for line in hunk:
+        if line.startswith("\\"):
+            continue
+        if not line:
+            out.append("")
+            continue
+        if line[0] in " -":
+            out.append(line[1:])
+    return out
+
+
+def _hunk_counts(hunk: list[str]) -> tuple[int, int]:
+    old_n = new_n = 0
+    for line in hunk:
+        if line.startswith("\\"):
+            continue
+        if not line:
+            old_n += 1
+            new_n += 1
+            continue
+        tag = line[0]
+        if tag in " -":
+            old_n += 1
+        if tag in " +":
+            new_n += 1
+    return old_n, new_n
+
+
+def _locate(file_lines: list[str], needle: list[str]) -> int:
+    if not needle:
+        raise _fail(FORMAT, INVALID_PATCH_FORMAT, "empty hunk context")
+    n = len(needle)
+    matches = [
+        i + 1
+        for i in range(len(file_lines) - n + 1)
+        if file_lines[i : i + n] == needle
+    ]
+    if len(matches) != 1:
+        raise _fail(APPLY, PATCH_DID_NOT_APPLY, "hunk context is not unique")
+    return matches[0]
+
+
+def rewrite_hunks(text: str, work: Path) -> bytes:
+    lines = text.splitlines()
+    out: list[str] = []
+    i = 0
+    path = ""
+    while i < len(lines):
+        line = lines[i]
+        header_a = _HEADER_A.match(line)
+        if header_a:
+            path = header_a.group(1)
+        if line.startswith("@@ "):
+            end = i + 1
+            while end < len(lines) and not lines[end].startswith(("@@ ", "diff --git ", "--- ")):
+                end += 1
+            hunk = lines[i + 1 : end]
+            old_n, new_n = _hunk_counts(hunk)
+            if not path:
+                raise _fail(FORMAT, INVALID_PATCH_FORMAT, "hunk without file header")
+            file_lines = (work / path).read_text(encoding="utf-8").splitlines()
+            start = _locate(file_lines, _old_side(hunk))
+            out.append(f"@@ -{start},{old_n} +{start},{new_n} @@")
+            out.extend(hunk)
+            i = end
+            continue
+        out.append(line)
+        i += 1
+    return ("\n".join(out) + "\n").encode("utf-8")
 
 
 def parse_unified_diff(raw: bytes, allowed: tuple[str, ...]) -> ValidatedPatch:
@@ -153,7 +282,11 @@ def parse_unified_diff(raw: bytes, allowed: tuple[str, ...]) -> ValidatedPatch:
 def apply_patch(work: Path, task: TaskSpec, raw: bytes) -> PatchReport:
     allowed = tuple(p.value for p in task.editable_checkout_paths)
     try:
-        parsed = parse_unified_diff(raw, allowed)
+        unwrapped = unwrap_candidate(raw.decode("utf-8")).encode("utf-8")
+        parsed = parse_unified_diff(unwrapped, allowed)
+    except UnicodeDecodeError:
+        failure = _fail(FORMAT, INVALID_PATCH_FORMAT, "not utf-8")
+        return PatchReport(task.id, hashlib.sha256(raw).hexdigest(), "failed", (), failure)
     except PatchFailure as exc:
         return PatchReport(task.id, hashlib.sha256(raw).hexdigest(), "failed", (), exc)
     for path in parsed.paths:
@@ -161,10 +294,14 @@ def apply_patch(work: Path, task: TaskSpec, raw: bytes) -> PatchReport:
         if not target.is_file() or target.is_symlink() or target.stat().st_nlink != 1:
             failure = _fail(POLICY, PATCH_POLICY_REJECTED, f"target is not a regular file {path}")
             return PatchReport(task.id, parsed.sha256, "failed", (), failure)
+    try:
+        rewritten = rewrite_hunks(parsed.content.decode("utf-8"), work)
+    except PatchFailure as exc:
+        return PatchReport(task.id, parsed.sha256, "failed", (), exc)
     proc = subprocess.run(
         ["git", "apply", "--index", "--whitespace=error", "-p1"],
         cwd=work,
-        input=parsed.content,
+        input=rewritten,
         capture_output=True,
     )
     if proc.returncode != 0:

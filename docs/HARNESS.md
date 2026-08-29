@@ -18,17 +18,31 @@ context. Tests and answers stay in the clone and never enter that
 message. `python run_providers.py --check-prompts` reprints SHA-256
 digests.
 
-Candidate responses must be a bare unified diff (`diff --git` or
-`--- a/` / `+++ b/`). Markdown fences fail `invalid_patch_format`.
-Apply is `git apply --index --whitespace=error -p1` with no fuzz
-and no hunk rewrite.
+Bake-off apply unwraps markdown fences and prefers a diff/patch
+fence or a body that starts with `diff --git` / `--- a/`. A leading
+Python diagnosis fence is skipped. Trailing prose after the last
+hunk line is stripped. `@@` headers are rewritten from unique
+old-side file context, then `git apply --index --whitespace=error
+-p1` with no fuzz. Host `_run_pair` rows keep `TRIAL_ROW_KEYS` in
+`run_providers.py`. Nested OpenRouter usage is lifted onto the jsonl
+(`reasoning_tokens`, `cached_tokens`, `cost_prompt`). Applied diffs
+land at `logs/runs/<run_id>/patches/`. Shown-pass / held-fail is
+`held_fail`. CoT uses `reasoning_details` xor `reasoning`, not both.
 
-Offline regrade is `python grade.py --response <artifact.json>`.
-The runner writes a `ResponseArtifact` before `grade.py` starts as a
-separate process with an environment allowlist. The container uses
-`--network=none`, a read-only root, bounded tmpfs, dropped
-capabilities, and a non-root user. Public tests are visible inside
-the container. Resource limits, not secrecy, are the security claim.
+Stay at `-k 1` until that campaign is clean; then `-k 3`. Dirty trees
+are marked `-dirty` and `comparable` is false. Compare only clean SHA
+rows.
+
+```sh
+python run_providers.py --spend --variance -k 1 --providers z-ai,novita
+python scripts/compare_trials.py logs/runs/<run_id>.jsonl
+```
+
+`logs/LAST_RUN.md` is the latest table. A copy is also written to
+`logs/runs/<run_id>/LAST_RUN.md`. The jsonl for that run is rewritten
+in catalog task order, then provider, then trial.
+
+Official campaigns:
 
 ```sh
 python run_providers.py --campaign campaigns/official-v1.json --plan
@@ -38,6 +52,5 @@ python report.py --manifest campaigns/official-v1.json --trials results/official
 ```
 
 `--resume` regrades saved artifacts. `--spend` is required to call
-OpenRouter. Dirty trees are marked `-dirty` and are not comparable.
-Compare published rows only at the frozen `benchmark_repo_sha`,
-`grader_source_sha`, and image digest.
+OpenRouter. Compare published campaign rows only at the frozen
+`benchmark_repo_sha`, `grader_source_sha`, and image digest.

@@ -7,7 +7,14 @@ import sys
 from pathlib import Path
 
 from campaign_plan import expand, load_campaign
-from run_providers import grade_env, print_campaign_plan
+from run_providers import (
+    TRIAL_ROW_KEYS,
+    _delta_piece,
+    _write_last_run,
+    grade_env,
+    print_campaign_plan,
+    usage_from_openrouter,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 MINI = ROOT / "tests" / "fixtures" / "campaigns" / "mini.json"
@@ -54,6 +61,129 @@ def test_campaign_without_spend_is_refused():
     )
     assert proc.returncode == 2
     assert "Refusing" in proc.stderr
+
+
+def test_delta_piece_does_not_double():
+    reason, content = _delta_piece(
+        {"reasoning": "The", "reasoning_details": [{"text": "The"}], "content": "x"}
+    )
+    assert reason == "The"
+    assert content == "x"
+    only, _ = _delta_piece({"reasoning": "Hi", "content": ""})
+    assert only == "Hi"
+
+
+def test_usage_from_openrouter_lifts_nested():
+    fields = usage_from_openrouter(
+        {
+            "prompt_tokens": 546,
+            "completion_tokens": 667,
+            "total_tokens": 1213,
+            "cost": 0.00017698,
+            "prompt_tokens_details": {"cached_tokens": 512, "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 121},
+            "cost_details": {
+                "upstream_inference_prompt_cost": 1.023e-05,
+                "upstream_inference_completions_cost": 0.00016675,
+            },
+        }
+    )
+    assert fields["cached_tokens"] == 512
+    assert fields["reasoning_tokens"] == 121
+    assert fields["total_tokens"] == 1213
+    assert fields["cost_prompt"] == 1.023e-05
+    assert fields["cost_completion"] == 0.00016675
+
+
+def test_trial_row_keys_frozen():
+    required = {
+        "trial_id",
+        "trial",
+        "k",
+        "reasoning_tokens",
+        "cached_tokens",
+        "applied_diff_path",
+        "applied_sha256",
+        "pass_shown",
+        "pass_held",
+        "quality",
+        "cost_prompt",
+        "files_changed_n",
+    }
+    assert required <= set(TRIAL_ROW_KEYS)
+
+
+def test_cli_has_k_and_variance():
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "run_providers.py"), "-h"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "--variance" in proc.stdout
+    assert "-k" in proc.stdout
+
+
+def test_write_last_run_column_header(tmp_path, monkeypatch):
+    import run_providers as rp
+
+    monkeypatch.setattr(rp, "LOGS", tmp_path)
+    _write_last_run(
+        {
+            "run_id": "t",
+            "model": "m",
+            "reasoning_effort": "high",
+            "temperature": 0,
+            "k": 1,
+            "comparable": True,
+            "benchmark_repo_sha": "abc",
+        },
+        [],
+        0.0,
+    )
+    text = (tmp_path / "LAST_RUN.md").read_text()
+    assert "reason_tok" in text
+    assert "quality" in text
+    assert (tmp_path / "runs" / "t" / "LAST_RUN.md").is_file()
+
+
+def test_compare_trials_same_diff(tmp_path):
+    left = tmp_path / "a.diff"
+    right = tmp_path / "b.diff"
+    left.write_bytes(b"same")
+    right.write_bytes(b"same")
+    jsonl = tmp_path / "run.jsonl"
+    rows = [
+        {
+            "task": "entity_reload",
+            "trial": 1,
+            "provider": "z-ai",
+            "pass": True,
+            "quality": "gold",
+            "applied_diff_path": str(left),
+            "applied_sha256": "aa",
+        },
+        {
+            "task": "entity_reload",
+            "trial": 1,
+            "provider": "novita",
+            "pass": True,
+            "quality": "gold",
+            "applied_diff_path": str(right),
+            "applied_sha256": "aa",
+        },
+    ]
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "compare_trials.py"), str(jsonl)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "same_diff" in proc.stdout
+    assert "yes" in proc.stdout
 
 
 def test_grade_env_drops_provider_secrets(monkeypatch):
