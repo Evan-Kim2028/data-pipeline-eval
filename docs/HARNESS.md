@@ -12,26 +12,16 @@ Model slug `z-ai/glm-5.3-flash`. Thinking cannot be disabled.
 | `allow_fallbacks` | `false` | Same. |
 | `require_parameters` | `true` | Official campaigns. |
 
-Official candidate messages come from `prompt_bundle.py`: a stable
-system prefix plus incident, entrypoint, and production context.
-Editable paths are not named. Tests stay in the clone and never
-enter that message.
-`python run_providers.py --check-prompts` reprints SHA-256 digests.
+Official candidate messages come from `prompt_bundle.py`: incident,
+entrypoint, editable paths, instructions, and faulted production
+context. Tests and answers stay in the clone and never enter that
+message. `python run_providers.py --check-prompts` reprints SHA-256
+digests.
 
-Prefix cache only hits when the **same host** sees the **same full
-prompt** again (k≥2, back-to-back). k=1 unique (task, host) pairs
-should report ~0 `cached_tokens`.
-
-`--spend --variance` is the original 9 very_hard on z-ai and novita.
-Stay at `-k 1` until that campaign is clean; then `-k 3`. Applied
-diffs: `logs/runs/<run_id>/patches/`. Compare:
-`python scripts/compare_trials.py logs/runs/<id>.jsonl`.
-Held-out fail is `held_fail`, not `equivalent`.
-
-Candidate responses must contain a unified diff (`diff --git` or
-`--- a/` / `+++ b/`). A markdown fence around the diff is unwrapped.
-Apply rewrites `@@` from unique file context, then
-`git apply --index --whitespace=error -p1` with no fuzz.
+Candidate responses must be a bare unified diff (`diff --git` or
+`--- a/` / `+++ b/`). Markdown fences fail `invalid_patch_format`.
+Apply is `git apply --index --whitespace=error -p1` with no fuzz
+and no hunk rewrite.
 
 Offline regrade is `python grade.py --response <artifact.json>`.
 The runner writes a `ResponseArtifact` before `grade.py` starts as a
@@ -39,8 +29,6 @@ separate process with an environment allowlist. The container uses
 `--network=none`, a read-only root, bounded tmpfs, dropped
 capabilities, and a non-root user. Public tests are visible inside
 the container. Resource limits, not secrecy, are the security claim.
-
-Campaigns:
 
 ```sh
 python run_providers.py --campaign campaigns/official-v1.json --plan
