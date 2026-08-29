@@ -1,0 +1,13 @@
+diff --git a/warehouse/sidecar/cutoff.py b/warehouse/sidecar/cutoff.py
+--- a/warehouse/sidecar/cutoff.py
++++ b/warehouse/sidecar/cutoff.py
+@@ -1,7 +1,7 @@
+ from __future__ import annotations
+ 
+-from datetime import date
++from datetime import date, datetime
+ 
+ 
+ def event_at_cutoff(cutoff: date) -> object:
+-    return cutoff.isoformat()
++    return datetime(cutoff.year, cutoff.month, cutoff.day)
