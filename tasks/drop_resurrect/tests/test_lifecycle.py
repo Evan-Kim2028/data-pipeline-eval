@@ -18,3 +18,13 @@ def test_undropped_table_opens() -> None:
     cat = Catalog()
     cat.create("gold.events")
     assert open_for_write(cat, "gold.events") is cat.tables["gold.events"]
+
+
+def test_never_seen_name_creates_and_drop_stays_dead() -> None:
+    cat = Catalog()
+    first = open_for_write(cat, "gold.new")
+    second = open_for_write(cat, "gold.new")
+    assert first is second
+    cat.drop("gold.new")
+    with pytest.raises(RuntimeError, match="dropped"):
+        open_for_write(cat, "gold.new")
