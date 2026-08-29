@@ -4,3 +4,4 @@ ts	phase	decision	why	evidence	result
 2026-08-29T20:15:00Z	phase-2	official prompts omit tests and hash exact bytes	candidate context must be production-only and deterministic	pytest 18 passed; --check-prompts identical across two runs	pushed
 2026-08-29T20:30:00Z	phase-3	strict git apply replaces fuzzy patcher	candidate edits must stay on declared files	pytest 21 passed; verify --check-patch gold applies and prose fails	pushed
 2026-08-29T21:15:00Z	phase-4	pinned Docker grader with no network or secrets	untrusted code must not see host credentials or the gold tree	pytest 27 passed; gold grade.py replayed twice with identical patch and output hashes	pushed
+2026-08-29T21:45:00Z	phase-5	warehouse is the only executable gold	copied solutions/ drifted from canonical files	audit_tasks.py 15 ok; JSON audit identical twice; pytest 28 passed	pushed
