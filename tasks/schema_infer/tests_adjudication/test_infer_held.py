@@ -9,3 +9,7 @@ def test_infer_sees_uuid_past_the_head_sample() -> None:
     rows = [{"listing_id": str(10_000_000 + i)} for i in range(100)]
     rows.append({"listing_id": UUID})
     assert infer_listing_id_kind(rows) is str
+
+
+def test_empty_batch_stays_string_kind() -> None:
+    assert infer_listing_id_kind([]) is str
