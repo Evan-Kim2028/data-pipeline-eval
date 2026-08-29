@@ -1,0 +1,8 @@
+{
+  "image": "sha256:96ccf50950b3063381de0272a7897d0ba1cc1ffdc549ce8902dace07b4592ed3",
+  "digest": "sha256:96ccf50950b3063381de0272a7897d0ba1cc1ffdc549ce8902dace07b4592ed3",
+  "grader_source_sha": "944bce266b630c38c142a9c45ef3f1405b697e4a",
+  "environment_sha256": "d6968fd0f78b9d4eec37b31f4ce459588bbcba22cd39346edae8ddef4e2187a2",
+  "dockerfile_sha256": "d6ffcaf124aab38de808d31257dcbd3c55d3e64f55f3fa78596ef3d7d3d6b62b",
+  "platform": "linux/amd64"
+}
