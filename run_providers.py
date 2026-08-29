@@ -4,6 +4,7 @@
     python run_providers.py                     # prints this help, exit 2
     python run_providers.py --spend --smoke     # timestamptz_cutoff on z-ai, novita
     python run_providers.py --spend --golden    # 5-task ladder on z-ai, novita
+    python run_providers.py --spend --hard      # very_hard tasks on z-ai, novita
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from catalog import GOLDEN_IDS, all_ids, default_ids
+from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids
 from quality import classify
 
 ROOT = Path(__file__).resolve().parent
@@ -650,6 +651,11 @@ def main() -> int:
         action="store_true",
         help="Five-task ladder on z-ai and novita.",
     )
+    ap.add_argument(
+        "--hard",
+        action="store_true",
+        help="All very_hard tasks on z-ai and novita.",
+    )
     ap.add_argument("--providers", default=",".join(DEFAULT_PROVIDERS))
     ap.add_argument(
         "--jobs",
@@ -665,9 +671,11 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    cheap = args.smoke or args.golden
+    cheap = args.smoke or args.golden or args.hard
     if args.task:
         tasks = tuple(args.task)
+    elif args.hard:
+        tasks = hard_ids()
     elif args.golden:
         tasks = GOLDEN_IDS
     elif args.smoke:

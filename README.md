@@ -38,4 +38,5 @@ python scripts/setup_eval.py --seed 42    # synthetic jsonl + partitions
 python verify.py                          # starters red, gold green
 python run_providers.py --spend --smoke    # timestamptz_cutoff on z-ai + novita
 python run_providers.py --spend --golden   # 5-task ladder on those two hosts
+python run_providers.py --spend --hard     # all very_hard tasks on those two hosts
 ```

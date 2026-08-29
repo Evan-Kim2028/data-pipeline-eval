@@ -153,3 +153,7 @@ GOLDEN_IDS = (
     "latest_pointer",
     "watermark_poison",
 )
+
+
+def hard_ids() -> tuple[str, ...]:
+    return tuple(t["id"] for t in TASKS if t["difficulty"] == "very_hard")
