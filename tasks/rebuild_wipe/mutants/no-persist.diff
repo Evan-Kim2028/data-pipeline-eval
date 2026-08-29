@@ -1,0 +1,12 @@
+diff --git a/warehouse/incremental/rebuild.py b/warehouse/incremental/rebuild.py
+--- a/warehouse/incremental/rebuild.py
++++ b/warehouse/incremental/rebuild.py
+@@ -7,5 +7,6 @@
+ 
+ 
+ def next_chunk(staging: dict[str, int], last_ok: int | None) -> int:
+-    staging.clear()
+-    return 0
++    if last_ok is None:
++        return 0
++    return last_ok + 1
