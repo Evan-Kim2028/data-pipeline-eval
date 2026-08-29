@@ -1,0 +1,11 @@
+Incident:
+
+An operator dropped gold.events. The next writer called get_or_create
+and the catalog recreated an empty table under the same name. Readers
+saw a live table with none of the dropped rows.
+
+The checkout is warehouse/. Tests call
+warehouse.jobs.table_open.open_for_write. A dropped name must stay
+dropped.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

@@ -1,0 +1,11 @@
+Incident:
+
+A column named note was dropped, then re-added as int. Historical
+string values showed up in the new column. The writer reused the
+dropped field identity instead of assigning a new one.
+
+The checkout is warehouse/. Tests call
+warehouse.jobs.schema_evo.drop_and_readd. Re-adding a name must not
+reuse the old field id.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

@@ -1,0 +1,10 @@
+Incident:
+
+A nightly reload lists entity keys that changed since the watermark,
+then scans events for those keys. The scan dropped the time
+predicate, so every changed entity reloaded its full history.
+
+The checkout is warehouse/. Tests call warehouse.jobs.entity_reload.run.
+Changed keys must still be filtered by event_at >= since.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

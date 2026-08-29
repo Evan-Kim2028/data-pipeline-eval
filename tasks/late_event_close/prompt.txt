@@ -1,0 +1,11 @@
+Incident:
+
+An event-time window was closed when processing_at passed the window
+end. A fact with event_at inside the window arrived the next day and
+was dropped. Late facts still belong to the event-time window.
+
+The checkout is warehouse/. Tests call
+warehouse.jobs.event_window.facts_in_window. Membership is event_at,
+not processing_at.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

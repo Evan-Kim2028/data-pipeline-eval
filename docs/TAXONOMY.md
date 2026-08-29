@@ -14,9 +14,12 @@ have pass rates.
 | `serving` | Serving contracts | What readers / next run treat as current or done |
 | `concurrency` | Concurrent writers | Stale handles, OCC retry |
 
-`latest_pointer` and `watermark_poison` share **serving**: both
-advertise a state that is not the committed truth. One is the
-latest-day pointer; the other is the checkpoint.
+`latest_pointer`, `watermark_poison`, `mtime_skip`, and
+`drop_resurrect` share **serving**: a reader or the next run treats
+incomplete or dropped state as current. `entity_reload`,
+`frozen_basis`, `read_write_split`, and `rebuild_wipe` share
+**incremental**. `field_readd` is **schema** (column identity).
+`late_event_close` is **time** (event time vs processing time).
 
 ## Difficulty (estimated)
 

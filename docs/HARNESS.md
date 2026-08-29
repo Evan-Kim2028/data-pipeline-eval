@@ -1,0 +1,27 @@
+# OpenRouter harness for GLM 5.3 Flash
+
+Locked for this gym so a score change is the host or the patch, not
+sampling. Model slug `z-ai/glm-5.3-flash`. Thinking cannot be disabled.
+
+| Setting | Value | Why |
+|---|---|---|
+| `temperature` | `0` | Repeatable host bake-off. Z.ai coding rec is `1.0`; do not also set `top_p`. |
+| `max_tokens` | `131072` | Model max output. A 2500 cap ate reasoning and returned empty `content`. |
+| `reasoning.effort` | `high` | Bake-off default. `max` ran ~6 min of CoT on `schema_infer`. |
+| `provider.only` | one host | No fallback. |
+| `allow_fallbacks` | `false` | Same. |
+
+Do not send `top_p` with `temperature` (Z.ai: pick one). Do not send
+`reasoning.max_tokens` (not a GLM knob). Prefer fp8 hosts.
+
+To score the model's ceiling instead of host variance, set
+`temperature` to `1.0` and still omit `top_p`.
+
+Fixtures: `python scripts/setup_eval.py --seed 42`.
+
+`--jobs` runs (task, host) pairs in parallel (default `min(8, n_pairs)`).
+Each pair streams SSE: a line every ~2s with elapsed, phase (`wait` /
+`think` / `patch`), think/patch char counts, and OpenRouter keepalives.
+Rows append to `results.jsonl` and `logs/runs/<run_id>.jsonl` as they
+finish. `logs/LAST_RUN.md` refreshes after each pair. Raw payloads stay
+in `logs/raw-*.json`.

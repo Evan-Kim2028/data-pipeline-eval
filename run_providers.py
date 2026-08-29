@@ -15,14 +15,34 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 from catalog import all_ids, default_ids
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _load_dotenv() -> None:
+    path = ROOT / ".env"
+    if not path.is_file():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key, val = key.strip(), val.strip().strip("'").strip('"')
+        if key and key not in os.environ:
+            os.environ[key] = val
+
+
+_load_dotenv()
 MODEL = "z-ai/glm-5.3-flash"
 API = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_PROVIDERS = (
@@ -38,36 +58,130 @@ DEFAULT_PROVIDERS = (
 TASKS = default_ids()
 ALL_TASKS = all_ids()
 MAX_SPEND_USD = 5.0
+MAX_TOKENS = 131072
+TEMPERATURE = 0
+REASONING_EFFORT = "high"
+HTTP_TIMEOUT_S = 600
+LOGS = ROOT / "logs"
+PRINT_LOCK = threading.Lock()
+LOG_LOCK = threading.Lock()
+SPEND_LOCK = threading.Lock()
+DEFAULT_JOBS = 8
+
+
+def _message_text(msg: dict) -> str:
+    content = msg.get("content")
+    if isinstance(content, str) and content.strip():
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+        joined = "".join(parts).strip()
+        if joined:
+            return joined
+    for key in ("reasoning", "reasoning_content"):
+        val = msg.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    return ""
 
 
 def _extract_python_or_diff(text: str) -> str:
+    if not text:
+        raise RuntimeError("empty model content")
     blocks = re.findall(r"```(?:diff|patch|python)?\n(.*?)```", text, re.DOTALL)
     if blocks:
         return blocks[0]
     return text
 
 
+def _apply_context_hunks(work: Path, blob: str) -> None:
+    applied = 0
+    parts = re.split(r"(?m)^--- ", blob)
+    for part in parts[1:]:
+        header, _, rest = part.partition("\n")
+        path = header.strip()
+        path = re.sub(r"^a/", "", path)
+        if rest.startswith("+++"):
+            plus, _, rest = rest.partition("\n")
+            alt = plus.replace("+++", "").strip()
+            alt = re.sub(r"^b/", "", alt)
+            if alt and alt != "/dev/null":
+                path = alt
+        target = work / path
+        if not target.is_file():
+            nested = work / "warehouse" / path.removeprefix("warehouse/")
+            if nested.is_file():
+                target = nested
+            else:
+                continue
+        old = target.read_text().splitlines()
+        new: list[str] = []
+        oi = 0
+        for line in rest.splitlines():
+            if line.startswith("@@") or line.startswith("diff "):
+                continue
+            if line.startswith("+") and not line.startswith("+++"):
+                new.append(line[1:])
+            elif line.startswith("-") and not line.startswith("---"):
+                if oi < len(old) and old[oi] == line[1:]:
+                    oi += 1
+                else:
+                    found = None
+                    for k in range(oi, min(oi + 8, len(old))):
+                        if old[k] == line[1:]:
+                            found = k
+                            break
+                    if found is None:
+                        continue
+                    new.extend(old[oi:found])
+                    oi = found + 1
+            elif line.startswith(" "):
+                ctx = line[1:]
+                if oi < len(old) and old[oi] == ctx:
+                    new.append(old[oi])
+                    oi += 1
+                else:
+                    new.append(ctx)
+            elif line.strip() == "":
+                continue
+        new.extend(old[oi:])
+        if new != old:
+            target.write_text("\n".join(new) + ("\n" if old else "\n"))
+            applied += 1
+    if applied == 0:
+        raise RuntimeError("context patch changed no files")
+
+
 def _apply_model_output(work: Path, raw: str) -> None:
-    """Apply a unified diff in work/, or overwrite a single hinted file."""
     blob = _extract_python_or_diff(raw)
-    if blob.lstrip().startswith(("diff ", "--- ", "+++ ")):
+    stripped = blob.lstrip()
+    if not stripped.startswith(("diff ", "--- ", "+++ ")):
+        raise RuntimeError("model output was not a unified diff")
+    last_err = b""
+    for extra in (["-p0"], ["-p1"], ["-p2"]):
         proc = subprocess.run(
-            ["git", "apply", "--whitespace=nowarn", "-p0"],
+            ["git", "apply", "--whitespace=nowarn", "--recount", *extra],
             cwd=work,
             input=blob.encode(),
             capture_output=True,
         )
-        if proc.returncode != 0:
-            proc = subprocess.run(
-                ["git", "apply", "--whitespace=nowarn", "-p1"],
-                cwd=work,
-                input=blob.encode(),
-                capture_output=True,
-            )
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stderr.decode()[-400:])
+        if proc.returncode == 0:
+            return
+        last_err = proc.stderr
+    proc = subprocess.run(
+        ["patch", "-p1", "--forward", "--fuzz=3"],
+        cwd=work,
+        input=blob.encode(),
+        capture_output=True,
+    )
+    if proc.returncode == 0:
         return
-    raise RuntimeError("model output was not a unified diff")
+    _apply_context_hunks(work, blob)
 
 
 def _file_tree(root: Path) -> str:
@@ -76,19 +190,57 @@ def _file_tree(root: Path) -> str:
     )
 
 
-def _complete(prompt: str, bundle: str, provider: str) -> tuple[str, dict]:
+def _delta_piece(delta: dict) -> tuple[str, str]:
+    reason: list[str] = []
+    for key in ("reasoning", "reasoning_content"):
+        val = delta.get(key)
+        if isinstance(val, str) and val:
+            reason.append(val)
+    details = delta.get("reasoning_details")
+    if isinstance(details, list):
+        for item in details:
+            if isinstance(item, dict):
+                bit = item.get("text") or item.get("content") or ""
+                if bit:
+                    reason.append(str(bit))
+    content = delta.get("content")
+    if not isinstance(content, str):
+        content = ""
+    return "".join(reason), content
+
+
+def _out(msg: str) -> None:
+    with PRINT_LOCK:
+        print(msg, flush=True)
+
+
+def _tick(task: str, provider: str, t0: float, phase: str, reason_n: int, content_n: int, note: str = "") -> None:
+    elapsed = time.perf_counter() - t0
+    line = (
+        f"  {task}/{provider}  {elapsed:6.1f}s  {phase:5}  "
+        f"think={reason_n}c  patch={content_n}c"
+    )
+    if note:
+        line += f"  {note}"
+    _out(line)
+
+
+def _complete(prompt: str, bundle: str, provider: str, *, task: str) -> tuple[str, dict]:
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         raise SystemExit("OPENROUTER_API_KEY is not set")
     body = {
         "model": MODEL,
-        "temperature": 0,
-        "max_tokens": 2500,
+        "temperature": TEMPERATURE,
+        "max_tokens": MAX_TOKENS,
+        "reasoning": {"effort": REASONING_EFFORT},
+        "stream": True,
+        "stream_options": {"include_usage": True},
         "provider": {"only": [provider], "allow_fallbacks": False},
         "messages": [
             {
                 "role": "user",
-                "content": prompt + "\n\nCheckout files:\n\n" + bundle,
+                "content": prompt + "\n\nCheckout:\n\n" + bundle,
             }
         ],
     }
@@ -98,28 +250,111 @@ def _complete(prompt: str, bundle: str, provider: str) -> tuple[str, dict]:
         headers={
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
+            "Accept": "text/event-stream",
             "HTTP-Referer": "https://github.com/Evan-Kim2028",
-            "X-OpenRouter-Title": "analytics-incidents-eval",
+            "X-OpenRouter-Title": "data-pipeline-eval",
         },
         method="POST",
     )
     t0 = time.perf_counter()
+    last_print = t0
+    phase = "wait"
+    reason_buf: list[str] = []
+    content_buf: list[str] = []
+    reason_n = 0
+    content_n = 0
+    usage: dict = {}
+    gen_id = "unknown"
+    finish_reason = None
+    host = provider
+    _tick(task, provider, t0, phase, 0, 0, "requesting")
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            payload = json.loads(resp.read().decode())
+        resp = urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"HTTP {exc.code} provider={provider}: {exc.read().decode()[:400]}") from exc
+    try:
+        while True:
+            raw_line = resp.readline()
+            if not raw_line:
+                break
+            line = raw_line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
+            now = time.perf_counter()
+            if line.startswith(":"):
+                note = line[1:].strip() or "keepalive"
+                if now - last_print >= 2.0:
+                    _tick(task, provider, t0, phase, reason_n, content_n, note)
+                    last_print = now
+                continue
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if payload.get("error"):
+                err = payload["error"]
+                msg = err.get("message") if isinstance(err, dict) else str(err)
+                raise RuntimeError(f"stream error provider={provider}: {msg}")
+            gen_id = payload.get("id") or gen_id
+            host = payload.get("provider") or host
+            if payload.get("usage"):
+                usage = payload["usage"]
+            choice = (payload.get("choices") or [{}])[0]
+            if choice.get("finish_reason"):
+                finish_reason = choice.get("finish_reason")
+            delta = choice.get("delta") or {}
+            r_bit, c_bit = _delta_piece(delta)
+            if r_bit:
+                reason_buf.append(r_bit)
+                reason_n += len(r_bit)
+                phase = "think"
+            if c_bit:
+                content_buf.append(c_bit)
+                content_n += len(c_bit)
+                phase = "patch"
+            if now - last_print >= 2.0:
+                _tick(task, provider, t0, phase, reason_n, content_n)
+                last_print = now
+    finally:
+        resp.close()
+    reasoning = "".join(reason_buf)
+    content = "".join(content_buf)
+    text = content.strip() or reasoning.strip()
     latency_s = time.perf_counter() - t0
-    usage = payload.get("usage") or {}
+    _tick(task, provider, t0, "done", len(reasoning), len(content), finish_reason or "")
+    LOGS.mkdir(parents=True, exist_ok=True)
+    raw_path = LOGS / f"raw-{task}-{provider}-{gen_id}.json"
+    raw_path.write_text(
+        json.dumps(
+            {
+                "choice": {
+                    "finish_reason": finish_reason,
+                    "message": {"content": content, "reasoning": reasoning[:80_000]},
+                },
+                "usage": usage,
+            },
+            indent=2,
+        )[:200_000]
+    )
     meta = {
-        "provider": payload.get("provider") or provider,
+        "provider": host,
         "latency_s": round(latency_s, 3),
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": usage.get("completion_tokens"),
         "cost": usage.get("cost") if isinstance(usage.get("cost"), (int, float)) else None,
-        "id": payload.get("id"),
+        "id": gen_id,
+        "finish_reason": finish_reason,
+        "content_chars": len(content),
+        "reasoning_chars": len(reasoning),
+        "raw_path": str(raw_path),
+        "stream": True,
     }
-    return payload["choices"][0]["message"]["content"], meta
+    if not text:
+        raise RuntimeError(f"empty content finish_reason={finish_reason}")
+    return text, meta
 
 
 def _pytest(tree: Path, tests: Path) -> tuple[bool, str]:
@@ -151,35 +386,104 @@ def _seed_tree(task: str) -> Path:
     return tmp
 
 
-def run_task(task: str, providers: list[str], spend: list[float]) -> list[dict]:
-    task_dir = ROOT / "tasks" / task
-    prompt = (task_dir / "prompt.txt").read_text()
-    tests = task_dir / "tests"
-    rows = []
-    for provider in providers:
-        if spend[0] >= MAX_SPEND_USD:
-            rows.append({"task": task, "provider": provider, "pass": False, "error": "spend cap"})
-            continue
-        row: dict = {"task": task, "provider": provider, "pass": False}
+def _append_jsonl(path: Path, row: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as fh:
+        fh.write(json.dumps(row) + "\n")
+
+
+def _write_last_run(run_id: str, rows: list[dict], spend: float) -> None:
+    LOGS.mkdir(parents=True, exist_ok=True)
+    last = [
+        f"# {run_id}",
+        "",
+        f"model `{MODEL}`  effort `{REASONING_EFFORT}`  temp `{TEMPERATURE}`  "
+        f"spend~${spend:.4f}",
+        "",
+        "| task | provider | pass | latency_s | prompt | completion | cost | error |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        err = (r.get("error") or "").replace("|", " ")
+        last.append(
+            f"| {r.get('task')} | {r.get('provider')} | {r.get('pass')} | "
+            f"{r.get('latency_s', '')} | {r.get('prompt_tokens', '')} | "
+            f"{r.get('completion_tokens', '')} | {r.get('cost', '')} | {err} |"
+        )
+    (LOGS / "LAST_RUN.md").write_text("\n".join(last) + "\n")
+
+
+def _record(run_meta: dict, all_rows: list[dict], spend: list[float], row: dict) -> None:
+    with LOG_LOCK:
+        all_rows.append(row)
+        _append_jsonl(ROOT / "results.jsonl", row)
+        _append_jsonl(LOGS / "runs" / f"{run_meta['run_id']}.jsonl", row)
+        with SPEND_LOCK:
+            spent = spend[0]
+        _write_last_run(run_meta["run_id"], list(all_rows), spent)
+
+
+def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_rows: list[dict]) -> dict:
+    with SPEND_LOCK:
+        over = spend[0] >= MAX_SPEND_USD
+    if over:
+        row = {"task": task, "provider": provider, "pass": False, "error": "spend cap", **run_meta}
+        _record(run_meta, all_rows, spend, row)
+        _out(f"FAIL {task:22} {provider:14} spend cap")
+        return row
+    row: dict = {"task": task, "provider": provider, "pass": False, **run_meta}
+    tmp = None
+    try:
+        _out(f">> {task}  {provider}  seeding checkout")
         tmp = _seed_tree(task)
         tree = _file_tree(tmp)
-        bundle = tree + "\n\nHidden tests (do not edit):\n"
+        bundle = "File tree:\n" + tree + "\n\nNeighborhood sources (faulted checkout):\n"
+        shown: set[Path] = set()
+        fault_root = ROOT / "tasks" / task / "fault"
+        neighbors: list[Path] = []
+        if fault_root.exists():
+            for p in fault_root.rglob("*.py"):
+                rel = p.relative_to(fault_root)
+                live = tmp / rel
+                if live.is_file():
+                    neighbors.append(live)
+                sib = live.parent
+                if sib.is_dir():
+                    neighbors.extend(sib.glob("*.py"))
+        for live in sorted(set(neighbors)):
+            if live in shown or not live.is_file():
+                continue
+            shown.add(live)
+            rel = live.relative_to(tmp).as_posix()
+            bundle += f"\n## {rel}\n```python\n{live.read_text()}```\n"
+        tests = ROOT / "tasks" / task / "tests"
+        prompt = (ROOT / "tasks" / task / "prompt.txt").read_text()
+        bundle += "\nHidden tests (do not edit):\n"
         for p in sorted(tests.glob("test_*.py")):
             bundle += f"\n## tests/{p.name}\n```python\n{p.read_text()}```\n"
-        try:
-            raw, meta = _complete(prompt, bundle, provider)
-            row.update(meta)
-            if meta.get("cost"):
+        raw, meta = _complete(prompt, bundle, provider, task=task)
+        row.update(meta)
+        if meta.get("cost"):
+            with SPEND_LOCK:
                 spend[0] += float(meta["cost"])
-            _apply_model_output(tmp, raw)
-            ok, pytest_out = _pytest(tmp, tests)
-            row["pass"] = ok
-            row["pytest"] = pytest_out.splitlines()[-8:]
-        except Exception as exc:
-            row["error"] = str(exc)[:400]
-        rows.append(row)
-        print(f"{'PASS' if row.get('pass') else 'FAIL':4} {task:22} {provider:14} {row.get('error') or ''}", flush=True)
-    return rows
+        _out(f"  {task}/{provider}  applying patch ({meta.get('content_chars', 0)}c)")
+        _apply_model_output(tmp, raw)
+        _out(f"  {task}/{provider}  pytest")
+        ok, pytest_out = _pytest(tmp, tests)
+        row["pass"] = ok
+        row["pytest"] = pytest_out.splitlines()[-8:]
+    except Exception as exc:
+        row["error"] = str(exc)[:400]
+        _out(f"  {task}/{provider}  error: {row['error']}")
+    finally:
+        if tmp is not None:
+            shutil.rmtree(tmp.parent, ignore_errors=True)
+    _record(run_meta, all_rows, spend, row)
+    _out(
+        f"{'PASS' if row.get('pass') else 'FAIL':4} {task:22} {provider:14} "
+        f"{row.get('latency_s', '')}s  ${row.get('cost') or 0}  {row.get('error') or ''}"
+    )
+    return row
 
 
 def main() -> int:
@@ -191,6 +495,12 @@ def main() -> int:
     )
     ap.add_argument("--task", choices=ALL_TASKS, action="append")
     ap.add_argument("--providers", default=",".join(DEFAULT_PROVIDERS))
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=0,
+        help="Parallel (task, host) workers. 0 = min(8, number of pairs).",
+    )
     args = ap.parse_args()
     if not args.spend:
         print(
@@ -201,13 +511,37 @@ def main() -> int:
         return 2
     tasks = tuple(args.task) if args.task else TASKS
     providers = [p.strip() for p in args.providers.split(",") if p.strip()]
+    pairs = [(t, p) for t in tasks for p in providers]
+    jobs = args.jobs if args.jobs > 0 else min(DEFAULT_JOBS, max(1, len(pairs)))
     spend = [0.0]
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_meta = {
+        "run_id": run_id,
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "model": MODEL,
+        "temperature": TEMPERATURE,
+        "max_tokens": MAX_TOKENS,
+        "reasoning_effort": REASONING_EFFORT,
+        "jobs": jobs,
+    }
+    _out(
+        f"run {run_id}  {len(pairs)} pairs  jobs={jobs}  "
+        f"effort={REASONING_EFFORT}  temp={TEMPERATURE}"
+    )
     rows: list[dict] = []
-    for task in tasks:
-        rows.extend(run_task(task, providers, spend))
-    out = ROOT / "results.jsonl"
-    out.write_text("".join(json.dumps(r) + "\n" for r in rows))
-    print(f"\n{sum(1 for r in rows if r.get('pass'))}/{len(rows)} passed  spend~${spend[0]:.4f}  wrote {out}")
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futs = [
+            pool.submit(_run_pair, task, provider, spend, run_meta, rows)
+            for task, provider in pairs
+        ]
+        for fut in as_completed(futs):
+            fut.result()
+    n_pass = sum(1 for r in rows if r.get("pass"))
+    run_path = LOGS / "runs" / f"{run_id}.jsonl"
+    _out(
+        f"\n{n_pass}/{len(rows)} passed  spend~${spend[0]:.4f}  "
+        f"run={run_id}  appended {ROOT / 'results.jsonl'}  wrote {run_path}"
+    )
     return 0
 
 

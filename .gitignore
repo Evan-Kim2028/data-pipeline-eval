@@ -1,6 +1,14 @@
 __pycache__/
 .pytest_cache/
 results.jsonl
+logs/
+.env
 *.pyc
 .venv/
 internal/
+.grok/
+warehouse/fixtures/bronze/
+warehouse/fixtures/chunks/
+warehouse/fixtures/events_history.jsonl
+warehouse/fixtures/changelog.jsonl
+

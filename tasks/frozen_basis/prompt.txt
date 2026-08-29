@@ -1,0 +1,11 @@
+Incident:
+
+First load of an empty table unique()d each incoming chunk against a
+start-of-run snapshot that had no rows. unique() still planned a full
+dedupe of the chunk. RSS climbed; the job never wrote.
+
+The checkout is warehouse/. Tests call
+warehouse.jobs.frozen_basis.merge_first_load. An empty existing
+snapshot must not call unique.
+
+Return a unified diff against warehouse/. Do not rewrite tests.
