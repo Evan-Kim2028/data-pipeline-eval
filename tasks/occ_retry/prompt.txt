@@ -1,0 +1,10 @@
+Incident:
+
+A history backfill hit CommitConflict — another writer had advanced
+the table. The retry reused the same in-memory handle, so every
+attempt conflicted. Do not refresh before the first commit. On
+conflict, refresh, then retry. Unrelated errors must not be retried.
+
+The checkout is warehouse/. Tests call warehouse.catalog.publish.publish_row.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

@@ -1,0 +1,11 @@
+Incident (2026-08-27 09:00):
+
+History merge probed whether the day's delta was empty, then hung.
+800 files staged in 89s, RSS climbed to 7.4G, no MERGE line. The
+emptiness probe uniqued the delta; a limit(1) after unique still
+planned the full unique.
+
+The checkout is warehouse/. Tests call warehouse.gold.merge.merge_delta.
+"Any rows?" must not unique the scan.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

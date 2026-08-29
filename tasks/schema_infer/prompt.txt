@@ -1,0 +1,12 @@
+Incident (2026-08-27):
+
+Nightly silver load reads one jsonl batch from mixed marketplaces.
+The first hundred listing ids were integers. Later in the same batch
+a second venue used UUID listing ids. The job inferred a type from
+the head of the file and crashed on the UUID row.
+
+The checkout is the warehouse/ package (ingest, silver, gold, catalog,
+history, ops, sources, …). Tests call warehouse.silver.load.load_listing_ids.
+Mixed batches must return every id as a string and must not crash.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

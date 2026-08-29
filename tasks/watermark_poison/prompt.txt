@@ -1,0 +1,10 @@
+Incident:
+
+A nightly job walks date windows and stores a watermark of the last
+window it finished. On a mid-loop abort the watermark had already
+moved, so the next nightly skipped the uncommitted window.
+
+The checkout is warehouse/. commit(w) applies the window and may raise.
+A window that did not commit must not be watermarked.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

@@ -1,0 +1,10 @@
+Incident (calibration):
+
+A gold job computed a 90-day lookback with the host's local
+date.today(). The warehouse date is UTC. Around midnight the local
+calendar and UTC disagree by a day.
+
+The checkout is warehouse/. Anchor the window on the current UTC date.
+Non-positive days => 1.
+
+Return a unified diff against warehouse/. Do not rewrite tests.

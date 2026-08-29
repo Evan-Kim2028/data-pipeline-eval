@@ -1,0 +1,10 @@
+Incident (calibration):
+
+Incremental job filters event_at >= lookback. event_at is timestamptz.
+The cutoff is a Python date. Passing date.isoformat() raised:
+ValueError: Invalid timestamp with zone: 2026-07-13.
+
+The checkout is warehouse/. Midnight UTC on that calendar date is the
+correct lower bound.
+
+Return a unified diff against warehouse/. Do not rewrite tests.
