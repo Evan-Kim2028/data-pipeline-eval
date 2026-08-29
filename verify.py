@@ -2,7 +2,7 @@
 """Red starters / green gold through the shared grader primitives. No network.
 
 Practice tests: tasks/<id>/tests
-Adjudication tests: tasks/<id>/tests_held (public, omitted from official prompts)
+Adjudication tests: tasks/<id>/tests_adjudication (public, omitted from official prompts)
 """
 
 from __future__ import annotations

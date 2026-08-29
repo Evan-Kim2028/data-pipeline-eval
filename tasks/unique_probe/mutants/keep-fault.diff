@@ -1,0 +1,11 @@
+diff --git a/warehouse/gold/probe.py b/warehouse/gold/probe.py
+--- a/warehouse/gold/probe.py
++++ b/warehouse/gold/probe.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ from warehouse.settings import STREAMING
+ 
+ 

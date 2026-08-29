@@ -9,7 +9,8 @@ first* attempt (true) and then never refreshes at all (false).
 
 **Gold.** On `CommitConflict`, `table.refresh()` then retry. Do not
 refresh before attempt 1. Do not retry `ValueError`. Overlay:
-`solutions/occ_retry/app/retry.py`.
+`warehouse/app/retry.py`.
 
-**Also green.** Refresh only after a conflict; cap attempts; last
-conflict re-raised.
+Canonical file: `warehouse/warehouse/catalog/retry.py`.
+Fault overlay: `tasks/occ_retry/fault/warehouse/catalog/retry.py`.
+Gold diff: `python scripts/audit_tasks.py --task occ_retry --show-gold-diff`.

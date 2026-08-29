@@ -58,7 +58,7 @@ def _spec(
         prompt_repo_path=RepoPath(f"tasks/{id}/prompt.txt"),
         fault_repo_path=RepoPath(f"tasks/{id}/fault"),
         practice_tests_repo_path=RepoPath(f"tasks/{id}/tests"),
-        adjudication_tests_repo_path=RepoPath(f"tasks/{id}/tests_held"),
+        adjudication_tests_repo_path=RepoPath(f"tasks/{id}/tests_adjudication"),
         gold_repo_path=RepoPath(gold),
         explanation_repo_path=RepoPath(f"docs/solutions/{id}.md"),
         mutant_repo_dir=RepoPath(f"tasks/{id}/mutants"),

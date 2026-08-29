@@ -1,0 +1,11 @@
+diff --git a/warehouse/event_time.py b/warehouse/event_time.py
+--- a/warehouse/event_time.py
++++ b/warehouse/event_time.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ 
+ def in_processing_window(
+     events: list[dict],

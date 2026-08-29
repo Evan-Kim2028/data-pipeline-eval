@@ -1,0 +1,11 @@
+diff --git a/warehouse/sidecar/cutoff.py b/warehouse/sidecar/cutoff.py
+--- a/warehouse/sidecar/cutoff.py
++++ b/warehouse/sidecar/cutoff.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ from datetime import date
+ 
+ 

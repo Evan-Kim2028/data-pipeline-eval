@@ -360,7 +360,7 @@ def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_
         _out(f">> {task}  {provider}  seeding checkout")
         tmp = _seed_tree(task)
         tests = ROOT / "tasks" / task / "tests"
-        held = ROOT / "tasks" / task / "tests_held"
+        held = ROOT / "tasks" / task / "tests_adjudication"
         rendered = bundle_for(task, ROOT)
         row["prompt_sha256"] = rendered.sha256
         message = rendered.content.decode("utf-8")

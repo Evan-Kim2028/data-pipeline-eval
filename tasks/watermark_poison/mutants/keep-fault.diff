@@ -1,0 +1,11 @@
+diff --git a/warehouse/checkpoints/nightly.py b/warehouse/checkpoints/nightly.py
+--- a/warehouse/checkpoints/nightly.py
++++ b/warehouse/checkpoints/nightly.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ from warehouse.checkpoints.windows import upcoming
+ 
+ 

@@ -7,8 +7,8 @@ input mtime to the output file mtime and skips older unread files.
 is not a cursor. `processed_names` is the cursor.
 
 **Gold.** Pending = names not in `processed_names`. Overlay:
-`solutions/mtime_skip/app/serving_cursors.py`.
+`warehouse/app/serving_cursors.py`.
 
-**Also green.** Persist a name set / watermark of processed files.
-Tests: output_mtime=90, processed `{chunk-new}` still leaves
-chunk-old and chunk-mid pending.
+Canonical file: `warehouse/warehouse/serving_cursors.py`.
+Fault overlay: `tasks/mtime_skip/fault/warehouse/serving_cursors.py`.
+Gold diff: `python scripts/audit_tasks.py --task mtime_skip --show-gold-diff`.

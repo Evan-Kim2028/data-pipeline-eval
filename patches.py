@@ -85,15 +85,9 @@ def parse_unified_diff(raw: bytes, allowed: tuple[str, ...]) -> ValidatedPatch:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise _fail(FORMAT, INVALID_PATCH_FORMAT, "not utf-8") from exc
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
     if "```" in text:
-        blocks = re.findall(r"```[^\n]*\n(.*?)```", text, re.DOTALL)
-        if not blocks:
-            raise _fail(FORMAT, INVALID_PATCH_FORMAT, "markdown fence")
-        text = blocks[0]
-        if not text.endswith("\n"):
-            text += "\n"
-    body = text
+        raise _fail(FORMAT, INVALID_PATCH_FORMAT, "markdown fence")
+    body = text.replace("\r\n", "\n").replace("\r", "\n")
     if not body.startswith(("diff --git ", "--- a/")):
         raise _fail(FORMAT, INVALID_PATCH_FORMAT, "not a bare unified diff")
     if "GIT binary patch" in body or "\nrename from " in body or "\ncopy from " in body:

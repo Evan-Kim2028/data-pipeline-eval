@@ -4,4 +4,8 @@
 dates are UTC. Around midnight they disagree by a day.
 
 **Gold.** Anchor on `utc_today()` (`datetime.now(timezone.utc).date()`).
-Overlay: `solutions/utc_lookback/app/lookback.py`.
+Overlay: `warehouse/app/lookback.py`.
+
+Canonical file: `warehouse/warehouse/time/lookback.py`.
+Fault overlay: `tasks/utc_lookback/fault/warehouse/time/lookback.py`.
+Gold diff: `python scripts/audit_tasks.py --task utc_lookback --show-gold-diff`.

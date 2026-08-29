@@ -9,8 +9,8 @@ membership. `closed_processing_at` is unused on the gold path.
 Membership is `event_at`.
 
 **Gold.** Keep rows with `start <= event_at <= end`. Overlay:
-`solutions/late_event_close/app/event_time.py`.
+`warehouse/app/event_time.py`.
 
-**Also green.** Separate a lateness buffer; do not drop on
-processing close. Tests: `ent-000-late` stays in yesterday's window
-when processing closed yesterday.
+Canonical file: `warehouse/warehouse/event_time.py`.
+Fault overlay: `tasks/late_event_close/fault/warehouse/event_time.py`.
+Gold diff: `python scripts/audit_tasks.py --task late_event_close --show-gold-diff`.

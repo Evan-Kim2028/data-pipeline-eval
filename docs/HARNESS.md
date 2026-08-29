@@ -36,17 +36,19 @@ enter that message. `python run_providers.py --check-prompts` reprints
 SHA-256 digests. Updating `tests/snapshots/prompt-sha256.json` requires
 reviewing the rendered bytes.
 
-`tasks/<id>/tests` and `tasks/<id>/tests_held` are public. Official
+`tasks/<id>/tests` and `tasks/<id>/tests_adjudication` are public. Official
 candidate messages omit both. A PASS currently requires both suites.
 After apply, `quality.py` tags the tree
 `gold` (byte-match fault files to the gold warehouse, no extra files),
 `equivalent` (only those files changed), or `other`.
 
 Candidate responses must contain one unified diff (`diff --git` or
-`--- a/` / `+++ b/`). A markdown fence around that diff is unwrapped,
-then apply is `git apply --index --whitespace=error -p1` onto allowed
-paths. Format, policy, and apply failures are distinct. Empty fences
-and non-diffs still fail format.
+`--- a/` / `+++ b/`). Prefer the unified-diff fence when several
+markdown fences are present. Leftover prose before or after the diff is
+stripped. Bare or miscounted `@@` headers are rewritten from unique
+file context. Apply remains `git apply --index --whitespace=error -p1`
+with no fuzz and no `--recount`. Format, policy, and apply failures
+are distinct. Empty fences and non-diffs still fail format.
 `python verify.py --check-patch TASK RESPONSE` checks a patch without
 running candidate code.
 
@@ -57,6 +59,11 @@ uses `--network=none`, a read-only root, bounded tmpfs, dropped
 capabilities, and a non-root user. Public tests are visible inside the
 container; Docker does not hide them. Resource limits, not secrecy,
 are the security claim.
+
+Harbor is not this harness. Extra Snowflake dbt tasks (analytics
+marts, dimensional authoring) will be run with Harbor on DuckDB;
+see `docs/RELATED.md`. Do not mix Harbor pass@1 with rows from
+`run_providers.py`.
 
 `--jobs` runs (task, host) pairs in parallel (default `min(8, n_pairs)`).
 One in-flight request per host. HTTP 429 retries with backoff.

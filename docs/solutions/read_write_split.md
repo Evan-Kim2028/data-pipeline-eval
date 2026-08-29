@@ -7,7 +7,8 @@ read walks every partition and returns the union.
 must not call it. Write path is already keyed.
 
 **Gold.** `read_day` returns `bronze.get(day, [])` only. Overlay:
-`solutions/read_write_split/app/partition_io.py`.
+`warehouse/app/partition_io.py`.
 
-**Also green.** Re-read the key just written; skip a glob of `*`.
-Tests: overwrite 2026-08-01 must not surface 2026-08-02.
+Canonical file: `warehouse/warehouse/incremental/partition_io.py`.
+Fault overlay: `tasks/read_write_split/fault/warehouse/incremental/partition_io.py`.
+Gold diff: `python scripts/audit_tasks.py --task read_write_split --show-gold-diff`.

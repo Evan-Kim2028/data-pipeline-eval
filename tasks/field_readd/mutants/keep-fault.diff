@@ -1,0 +1,11 @@
+diff --git a/warehouse/schema_evo.py b/warehouse/schema_evo.py
+--- a/warehouse/schema_evo.py
++++ b/warehouse/schema_evo.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ 
+ class ColumnStore:
+     def __init__(self) -> None:

@@ -51,7 +51,7 @@ def _tar_bytes(checkout_dir: Path, task_id: str) -> bytes:
         add(ROOT / task.practice_tests_repo_path.value, "tests")
         held = ROOT / task.adjudication_tests_repo_path.value
         if held.is_dir():
-            add(held, "tests_held")
+            add(held, "tests_adjudication")
         policy = json.dumps(
             {
                 "task_id": task_id,

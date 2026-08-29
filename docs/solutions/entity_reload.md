@@ -9,7 +9,8 @@ like the nightly path. `jobs.entity_reload.changed_ids` is already
 correct. The scan in `load_changed` is the one that lost `since`.
 
 **Gold.** Filter `entity_id in changed_ids` **and** `event_at >=
-since`. Overlay: `solutions/entity_reload/app/reload.py`.
+since`.
 
-**Also green.** Intersect with a watermarked slice first, then
-filter keys. Tests: `len(rows) < 20` and every row `event_at >= since`.
+Canonical file: `warehouse/warehouse/incremental/reload.py`.
+Fault overlay: `tasks/entity_reload/fault/warehouse/incremental/reload.py`.
+Gold diff: `python scripts/audit_tasks.py --task entity_reload --show-gold-diff`.

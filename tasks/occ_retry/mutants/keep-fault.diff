@@ -1,0 +1,11 @@
+diff --git a/warehouse/catalog/retry.py b/warehouse/catalog/retry.py
+--- a/warehouse/catalog/retry.py
++++ b/warehouse/catalog/retry.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ from warehouse.errors import CommitConflict
+ from warehouse.settings import MAX_COMMIT_ATTEMPTS
+ 

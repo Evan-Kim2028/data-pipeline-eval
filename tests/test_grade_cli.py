@@ -27,7 +27,7 @@ def test_task_archive_has_faulted_checkout_and_public_tests_only():
         names = tar.getnames()
     assert any(n.startswith("checkout/") for n in names)
     assert any(n.startswith("tests/") for n in names)
-    assert any(n.startswith("tests_held/") for n in names)
+    assert any(n.startswith("tests_adjudication/") for n in names)
     assert "policy.json" in names
     joined = "\n".join(names)
     assert "docs/solutions" not in joined

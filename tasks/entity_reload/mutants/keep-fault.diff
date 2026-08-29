@@ -1,0 +1,11 @@
+diff --git a/warehouse/incremental/reload.py b/warehouse/incremental/reload.py
+--- a/warehouse/incremental/reload.py
++++ b/warehouse/incremental/reload.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ 
+ def load_all_for_ids(events: list[dict], changed_ids: set[str]) -> list[dict]:
+     return [row for row in events if row["entity_id"] in changed_ids]

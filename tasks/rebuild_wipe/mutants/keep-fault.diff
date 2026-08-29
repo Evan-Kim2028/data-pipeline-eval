@@ -1,0 +1,11 @@
+diff --git a/warehouse/incremental/rebuild.py b/warehouse/incremental/rebuild.py
+--- a/warehouse/incremental/rebuild.py
++++ b/warehouse/incremental/rebuild.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ 
+ def restart(staging: dict[str, int]) -> int:
+     staging.clear()

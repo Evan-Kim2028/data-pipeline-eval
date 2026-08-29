@@ -1,0 +1,11 @@
+diff --git a/warehouse/incremental/partition_io.py b/warehouse/incremental/partition_io.py
+--- a/warehouse/incremental/partition_io.py
++++ b/warehouse/incremental/partition_io.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ 
+ def write_day(bronze: dict[str, list[dict]], day: str, rows: list[dict]) -> None:
+     bronze[day] = list(rows)

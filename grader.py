@@ -18,15 +18,35 @@ WORK = Path("/work")
 MAX_OUTPUT = 200_000
 
 
-def run_pytest(tree: Path, tests: Path) -> tuple[int, str, int, int]:
-    if not tests.is_dir() or not any(tests.glob("test_*.py")):
-        return 0, "", 0, 0
+def _pytest_env(tree: Path) -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(tree)
     env["HOME"] = env.get("HOME", "/tmp")
     env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("OPENROUTER_API_KEY", None)
+    return env
+
+
+def collect_node_ids(tree: Path, tests: Path) -> tuple[int, tuple[str, ...]]:
+    if not tests.is_dir() or not any(tests.glob("test_*.py")):
+        return 2, ()
+    env = _pytest_env(tree)
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "--collect-only", str(tests)],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    nodes = tuple(ln.strip() for ln in proc.stdout.splitlines() if "::" in ln)
+    return proc.returncode, nodes
+
+
+def run_pytest(tree: Path, tests: Path) -> tuple[int, str, int, int]:
+    if not tests.is_dir() or not any(tests.glob("test_*.py")):
+        return 0, "", 0, 0
+    env = _pytest_env(tree)
     collect = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "--collect-only", str(tests)],
         cwd=tree,
@@ -117,7 +137,7 @@ def main() -> int:
     payload = grade_tree(
         tree=tree,
         practice=dest / "tests",
-        adjudication=dest / "tests_held",
+        adjudication=dest / "tests_adjudication",
         task=task,
         candidate=raw,
     )

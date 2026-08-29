@@ -1,0 +1,11 @@
+diff --git a/warehouse/incremental/basis.py b/warehouse/incremental/basis.py
+--- a/warehouse/incremental/basis.py
++++ b/warehouse/incremental/basis.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ 
+ def merge_always_unique(existing: list[dict], incoming: list[dict], unique_fn) -> list[dict]:
+     return unique_fn(list(existing) + list(incoming))
