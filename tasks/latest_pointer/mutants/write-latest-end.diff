@@ -1,0 +1,11 @@
+diff --git a/warehouse/history/backfill.py b/warehouse/history/backfill.py
+--- a/warehouse/history/backfill.py
++++ b/warehouse/history/backfill.py
+@@ -17,6 +17,6 @@
+         as_of = today - timedelta(days=offset)
+         payload = payload_for(as_of)
+         write_partition(store, as_of, payload)
+-        write_latest(store, as_of, payload)
+         written += 1
++    write_latest(store, today, "restored")
+     return written
