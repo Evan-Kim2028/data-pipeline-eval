@@ -29,6 +29,13 @@ Comparable rows copy `benchmark_repo_sha` and `environment_sha256` from
 the campaign manifest. Dirty trees are marked `-dirty` and are not
 comparable.
 
+Official candidate messages are built by `prompt_bundle.py` from the
+incident file, declared entrypoint, editable paths, and faulted
+production context. Tests and solutions stay in the clone but never
+enter that message. `python run_providers.py --check-prompts` reprints
+SHA-256 digests. Updating `tests/snapshots/prompt-sha256.json` requires
+reviewing the rendered bytes.
+
 `tasks/<id>/tests` and `tasks/<id>/tests_held` are public. Official
 candidate messages omit both. A PASS currently requires both suites.
 After apply, `quality.py` tags the tree

@@ -28,6 +28,7 @@ from pathlib import Path
 
 from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids
 from contracts import environment_digest, git_revision
+from prompt_bundle import all_bundles, bundle_for
 from quality import classify
 
 ROOT = Path(__file__).resolve().parent
@@ -212,7 +213,7 @@ def _apply_context_hunks(work: Path, blob: str) -> None:
                 target = nested
             else:
                 continue
-        old = target.read_text().splitlines()
+        old = target.read_text(encoding="utf-8").splitlines()
         new = _apply_hunk_lines(old, rest.splitlines())
         if new != old:
             target.write_text("\n".join(new) + "\n")
@@ -269,6 +270,14 @@ def _apply_model_output(work: Path, raw: str) -> None:
     stripped = blob.lstrip()
     if not stripped.startswith(("diff ", "--- ", "+++ ")):
         raise RuntimeError("apply_fail: model output was not a unified diff")
+    try:
+        _apply_model_output_inner(work, blob)
+    except UnicodeDecodeError as exc:
+        _reset_work(work)
+        raise RuntimeError(f"apply_fail:utf-8: {exc}") from exc
+
+
+def _apply_model_output_inner(work: Path, blob: str) -> None:
     last = "apply_fail"
     for extra in (["-p0"], ["-p1"], ["-p2"]):
         _reset_work(work)
@@ -291,12 +300,6 @@ def _apply_model_output(work: Path, raw: str) -> None:
         return
     _reset_work(work)
     raise RuntimeError(last)
-
-
-def _file_tree(root: Path) -> str:
-    return "\n".join(
-        sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
-    )
 
 
 def _delta_piece(delta: dict) -> tuple[str, str]:
@@ -334,7 +337,7 @@ def _tick(task: str, provider: str, t0: float, phase: str, reason_n: int, conten
     _out(line)
 
 
-def _complete(prompt: str, bundle: str, provider: str, *, task: str) -> tuple[str, dict]:
+def _complete(message: str, provider: str, *, task: str) -> tuple[str, dict]:
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         raise SystemExit("OPENROUTER_API_KEY is not set")
@@ -349,7 +352,7 @@ def _complete(prompt: str, bundle: str, provider: str, *, task: str) -> tuple[st
         "messages": [
             {
                 "role": "user",
-                "content": prompt + "\n\nCheckout:\n\n" + bundle,
+                "content": message,
             }
         ],
     }
@@ -559,36 +562,15 @@ def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_
     try:
         _out(f">> {task}  {provider}  seeding checkout")
         tmp = _seed_tree(task)
-        tree = _file_tree(tmp)
-        bundle = "File tree:\n" + tree + "\n\nNeighborhood sources (faulted checkout):\n"
-        shown: set[Path] = set()
-        fault_root = ROOT / "tasks" / task / "fault"
-        neighbors: list[Path] = []
-        if fault_root.exists():
-            for p in fault_root.rglob("*.py"):
-                rel = p.relative_to(fault_root)
-                live = tmp / rel
-                if live.is_file():
-                    neighbors.append(live)
-                sib = live.parent
-                if sib.is_dir():
-                    neighbors.extend(sib.glob("*.py"))
-        for live in sorted(set(neighbors)):
-            if live in shown or not live.is_file():
-                continue
-            shown.add(live)
-            rel = live.relative_to(tmp).as_posix()
-            bundle += f"\n## {rel}\n```python\n{live.read_text()}```\n"
         tests = ROOT / "tasks" / task / "tests"
         held = ROOT / "tasks" / task / "tests_held"
-        prompt = (ROOT / "tasks" / task / "prompt.txt").read_text()
-        bundle += "\nHidden tests (do not edit):\n"
-        for p in sorted(tests.glob("test_*.py")):
-            bundle += f"\n## tests/{p.name}\n```python\n{p.read_text()}```\n"
+        rendered = bundle_for(task, ROOT)
+        row["prompt_sha256"] = rendered.sha256
+        message = rendered.content.decode("utf-8")
         with SEM_LOCK:
             sem = PROVIDER_SEMS.setdefault(provider, threading.Semaphore(PER_PROVIDER))
         with sem:
-            raw, meta = _complete(prompt, bundle, provider, task=task)
+            raw, meta = _complete(message, provider, task=task)
         host_name = meta.get("provider")
         row.update(meta)
         row["provider"] = provider
@@ -694,7 +676,24 @@ def main() -> int:
         default=0,
         help="Parallel (task, host) workers. 0 = min(8, number of pairs).",
     )
+    ap.add_argument(
+        "--render-prompt",
+        choices=ALL_TASKS,
+        help="Print the official candidate message for one task. No network.",
+    )
+    ap.add_argument(
+        "--check-prompts",
+        action="store_true",
+        help="Render all official prompts and print SHA-256 digests. No network.",
+    )
     args = ap.parse_args()
+    if args.check_prompts:
+        for task_id, bundle in all_bundles(ROOT).items():
+            print(f"{task_id} {len(bundle.content)} {bundle.sha256}")
+        return 0
+    if args.render_prompt:
+        sys.stdout.buffer.write(bundle_for(args.render_prompt, ROOT).content)
+        return 0
     if not args.spend:
         print(
             "Refusing to call OpenRouter. Pass --spend when you want to burn credits.\n"
