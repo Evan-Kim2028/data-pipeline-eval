@@ -1,3 +1,4 @@
 ts	phase	decision	why	evidence	result
 2026-08-29T19:50:00Z	phase-0	branched feature/open-benchmark-credibility from e546d9a	public main already has the 15-task corpus, plan, and held tests	commit e546d9a	verify.py red/green for all 15
 2026-08-29T20:00:00Z	phase-1	landed contracts, catalog, checkouts, and environment pin	comparable rows need explicit SHA and env digest	tests 15 passed; verify.py 15 red/green	pushed next
+2026-08-29T20:15:00Z	phase-2	official prompts omit tests and hash exact bytes	candidate context must be production-only and deterministic	pytest 18 passed; --check-prompts identical across two runs	pushed
