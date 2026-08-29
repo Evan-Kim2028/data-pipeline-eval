@@ -38,6 +38,9 @@ OUTCOME_KINDS = frozenset(
         "timeout",
         "budget_stop",
         "interrupted_spend",
+        "parameter_rejection",
+        "capability_unavailable",
+        "provider_mismatch",
     }
 )
 

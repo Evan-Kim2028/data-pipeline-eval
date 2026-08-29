@@ -5,3 +5,6 @@ ts	phase	decision	why	evidence	result
 2026-08-29T20:30:00Z	phase-3	strict git apply replaces fuzzy patcher	candidate edits must stay on declared files	pytest 21 passed; verify --check-patch gold applies and prose fails	pushed
 2026-08-29T21:15:00Z	phase-4	pinned Docker grader with no network or secrets	untrusted code must not see host credentials or the gold tree	pytest 27 passed; gold grade.py replayed twice with identical patch and output hashes	pushed
 2026-08-29T21:45:00Z	phase-5	warehouse is the only executable gold	copied solutions/ drifted from canonical files	audit_tasks.py 15 ok; JSON audit identical twice; pytest 28 passed	pushed
+2026-08-29T23:30:00Z	phase-6	hardened all 15 tasks with mutants and three API redesigns	public tests must fail the fault and the keep-fault mutant	audit_tasks.py 15 ok; pytest green; 12 prompt hashes unchanged	pushed next
+2026-08-29T23:45:00Z	phase-7	campaign plan, trial store, and spend-gated runner	frozen manifests must expand identically and refuse spend by default	--plan twice byte-identical; pytest 64 passed	pushed next
+2026-08-29T23:50:00Z	phase-8	stdlib report CLI and clone/grade/replay docs	rates need denominators and no ranking	report twice identical; check_release ok	PR next

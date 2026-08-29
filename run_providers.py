@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -24,11 +25,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dataclasses import asdict
+
+from campaign_plan import Campaign, CampaignError, expand, load_campaign
 from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
-from contracts import environment_digest, git_revision
+from contracts import SCHEMA_VERSION, ResponseArtifact, encode_json, environment_digest, git_revision
 from patches import apply_patch
 from prompt_bundle import all_bundles, bundle_for
 from quality import classify
+from sandbox import image_lock
+from trial_store import SpendEvent, TrialStore
 
 ROOT = Path(__file__).resolve().parent
 
@@ -76,6 +82,19 @@ PROVIDER_SEMS: dict[str, threading.Semaphore] = {}
 DEFAULT_JOBS = 8
 PER_PROVIDER = 1
 RETRY_429 = 4
+_GRADE_ENV = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "USER",
+    "LOGNAME",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "PYTHONPATH",
+)
 
 
 def _message_text(msg: dict) -> str:
@@ -134,10 +153,13 @@ def _tick(task: str, provider: str, t0: float, phase: str, reason_n: int, conten
     _out(line)
 
 
-def _complete(message: str, provider: str, *, task: str) -> tuple[str, dict]:
+def _complete(message: str, provider: str, *, task: str, require_parameters: bool = False) -> tuple[str, dict]:
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         raise SystemExit("OPENROUTER_API_KEY is not set")
+    provider_cfg: dict = {"only": [provider], "allow_fallbacks": False}
+    if require_parameters:
+        provider_cfg["require_parameters"] = True
     body = {
         "model": MODEL,
         "temperature": TEMPERATURE,
@@ -145,7 +167,7 @@ def _complete(message: str, provider: str, *, task: str) -> tuple[str, dict]:
         "reasoning": {"effort": REASONING_EFFORT},
         "stream": True,
         "stream_options": {"include_usage": True},
-        "provider": {"only": [provider], "allow_fallbacks": False},
+        "provider": provider_cfg,
         "messages": [
             {
                 "role": "user",
@@ -450,6 +472,223 @@ def _summary(rows: list[dict], providers: list[str], tasks: tuple[str, ...]) -> 
         _out(f"{p}: {sum(1 for r in subset if r.get('pass'))}/{len(subset)}")
 
 
+def grade_env() -> dict[str, str]:
+    env = {key: os.environ[key] for key in _GRADE_ENV if key in os.environ}
+    for banned in ("OPENROUTER_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        env.pop(banned, None)
+    return env
+
+
+def invoke_grade(artifact_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(ROOT / "grade.py"), "--response", str(artifact_path)],
+        cwd=ROOT,
+        env=grade_env(),
+        capture_output=True,
+        text=True,
+    )
+
+
+def write_response_artifact(results: Path, artifact: ResponseArtifact) -> Path:
+    path = results / "responses" / f"{artifact.candidate_sha256}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(encode_json(artifact) + "\n")
+    os.replace(tmp, path)
+    return path
+
+
+def print_campaign_plan(path: Path) -> int:
+    campaign = load_campaign(path)
+    for row in expand(campaign):
+        print(json.dumps(asdict(row), separators=(",", ":"), sort_keys=True))
+    return 0
+
+
+def local_preflight(campaign: Campaign) -> list[dict]:
+    lock = image_lock()
+    env = environment_digest(ROOT)
+    rows: list[dict] = []
+    hashes = dict(campaign.manifest.prompt_hashes)
+    for task_id in campaign.manifest.task_ids:
+        rendered = bundle_for(task_id, ROOT)
+        ok = rendered.sha256 == hashes[task_id]
+        rows.append(
+            {
+                "kind": "prompt",
+                "task_id": task_id,
+                "ok": ok,
+                "prompt_hash": rendered.sha256,
+            }
+        )
+        if not ok:
+            raise CampaignError(f"prompt hash mismatch for {task_id}")
+    if campaign.grader_image_digest != lock["digest"]:
+        raise CampaignError("grader_image_digest does not match docker/grader-image.json")
+    if campaign.manifest.environment_sha256 != env:
+        raise CampaignError("environment_sha256 does not match pinned environment")
+    for provider in campaign.manifest.requested_providers:
+        rows.append(
+            {
+                "kind": "provider",
+                "requested_provider": provider,
+                "require_parameters": True,
+                "ok": True,
+            }
+        )
+    rows.append(
+        {
+            "kind": "pins",
+            "grader_image_digest": lock["digest"],
+            "environment_sha256": env,
+            "ok": True,
+        }
+    )
+    return rows
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def resume_regrade(campaign: Campaign, results: Path) -> int:
+    store = TrialStore(results)
+    specs = expand(campaign)
+    store.plan(specs)
+    pending = store.pending(specs)
+    for row in pending:
+        state = store.state_of(row.trial_id)
+        if state not in {"response_saved", "graded"}:
+            print(
+                f"resume needs --spend for {row.trial_id} (state={state})",
+                file=sys.stderr,
+            )
+            return 2
+        matches = (
+            list((results / "responses").glob("*.json"))
+            if (results / "responses").is_dir()
+            else []
+        )
+        chosen = None
+        for path in matches:
+            data = json.loads(path.read_text())
+            if data.get("trial_id") == row.trial_id:
+                chosen = path
+                break
+        if chosen is None:
+            print(f"missing response artifact for {row.trial_id}", file=sys.stderr)
+            return 2
+        if state == "response_saved":
+            proc = invoke_grade(chosen)
+            store.append_trial(row, "graded")
+            store.append_trial(row, "terminal")
+            _out(f"{row.trial_id} regraded exit={proc.returncode}")
+        elif state == "graded":
+            store.append_trial(row, "terminal")
+    return 0
+
+
+def run_campaign(campaign: Campaign, results: Path) -> int:
+    store = TrialStore(results)
+    specs = expand(campaign)
+    store.plan(specs)
+    n = max(len(specs), 1)
+    reserve_amt = min(0.25, campaign.spend_cap / n) if campaign.spend_cap else 0.0
+    sha, dirty = git_revision(ROOT)
+    published = sha if not dirty else f"{sha}-dirty"
+    lock = image_lock()
+    env = environment_digest(ROOT)
+    pending = store.pending(specs)
+    for row in pending:
+        totals = store.spend_totals()
+        if totals["exposure"] + reserve_amt > campaign.spend_cap + 1e-9:
+            store.append_trial(row, "terminal")
+            continue
+        store.append_trial(row, "reserved")
+        store.append_spend(
+            SpendEvent(
+                event_id=f"{row.trial_id}:reserve",
+                trial_id=row.trial_id,
+                kind="reserve",
+                amount=reserve_amt,
+                currency="USD",
+                provider_generation_id=None,
+                timestamp=_now(),
+                manifest_hash=row.manifest_hash,
+            )
+        )
+        store.append_trial(row, "dispatched")
+        rendered = bundle_for(row.task_id, ROOT)
+        try:
+            text, meta = _complete(
+                rendered.content.decode("utf-8"),
+                row.requested_provider,
+                task=row.task_id,
+                require_parameters=True,
+            )
+        except Exception as exc:
+            store.append_spend(
+                SpendEvent(
+                    event_id=f"{row.trial_id}:unknown",
+                    trial_id=row.trial_id,
+                    kind="unknown",
+                    amount=reserve_amt,
+                    currency="USD",
+                    provider_generation_id=None,
+                    timestamp=_now(),
+                    manifest_hash=row.manifest_hash,
+                )
+            )
+            store.append_trial(row, "terminal")
+            _out(f"FAIL {row.trial_id} {exc}")
+            continue
+        served = str(meta.get("provider") or row.requested_provider)
+        cost = meta.get("cost")
+        settled = float(cost) if isinstance(cost, (int, float)) else 0.0
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        artifact = ResponseArtifact(
+            schema_version=SCHEMA_VERSION,
+            trial_id=row.trial_id,
+            task_id=row.task_id,
+            candidate_text=text,
+            candidate_sha256=digest,
+            prompt_sha256=row.prompt_hash,
+            model=campaign.manifest.model,
+            requested_provider=row.requested_provider,
+            served_provider=served,
+            generation_id=None if meta.get("id") == "unknown" else str(meta.get("id")),
+            usage={
+                "prompt_tokens": meta.get("prompt_tokens"),
+                "completion_tokens": meta.get("completion_tokens"),
+                "cost": cost if isinstance(cost, (int, float)) else None,
+            },
+            finish_reason=meta.get("finish_reason"),
+            benchmark_repo_sha=published,
+            grader_source_sha=campaign.grader_source_sha,
+            grader_image_digest=lock["digest"],
+            environment_sha256=env,
+        )
+        write_response_artifact(results, artifact)
+        store.append_trial(row, "response_saved")
+        store.append_spend(
+            SpendEvent(
+                event_id=f"{row.trial_id}:settle",
+                trial_id=row.trial_id,
+                kind="settle",
+                amount=settled,
+                currency="USD",
+                provider_generation_id=artifact.generation_id,
+                timestamp=_now(),
+                manifest_hash=row.manifest_hash,
+            )
+        )
+        proc = invoke_grade(results / "responses" / f"{digest}.json")
+        store.append_trial(row, "graded")
+        store.append_trial(row, "terminal")
+        _out(f"{row.trial_id} served={served} grade={proc.returncode}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -490,6 +729,27 @@ def main() -> int:
         action="store_true",
         help="Render all official prompts and print SHA-256 digests. No network.",
     )
+    ap.add_argument("--campaign", type=Path, help="Frozen campaign manifest JSON.")
+    ap.add_argument(
+        "--plan",
+        action="store_true",
+        help="Print the expanded trial plan for --campaign. No network.",
+    )
+    ap.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Validate campaign pins and prompt hashes. No provider spend.",
+    )
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="Finish pending campaign trials. Regrade saved artifacts without --spend.",
+    )
+    ap.add_argument(
+        "--results",
+        type=Path,
+        help="Campaign result directory. Default: results/<campaign_id>.",
+    )
     args = ap.parse_args()
     if args.check_prompts:
         for task_id, bundle in all_bundles(ROOT).items():
@@ -498,6 +758,30 @@ def main() -> int:
     if args.render_prompt:
         sys.stdout.buffer.write(bundle_for(args.render_prompt, ROOT).content)
         return 0
+    if args.campaign:
+        if args.plan:
+            return print_campaign_plan(args.campaign)
+        campaign = load_campaign(args.campaign)
+        results = args.results or (ROOT / "results" / campaign.manifest.campaign_id)
+        if args.preflight:
+            rows = local_preflight(campaign)
+            results.mkdir(parents=True, exist_ok=True)
+            with (results / "preflight.jsonl").open("w") as fh:
+                for row in rows:
+                    line = json.dumps(row, separators=(",", ":"), sort_keys=True)
+                    print(line)
+                    fh.write(line + "\n")
+            return 0
+        if args.resume and not args.spend:
+            return resume_regrade(campaign, results)
+        if not args.spend:
+            print(
+                "Refusing to call OpenRouter. Pass --spend when you want to burn credits.\n"
+                "Offline: --plan, --preflight, or --resume with saved artifacts.",
+                file=sys.stderr,
+            )
+            return 2
+        return run_campaign(campaign, results)
     if not args.spend:
         print(
             "Refusing to call OpenRouter. Pass --spend when you want to burn credits.\n"
