@@ -1,0 +1,11 @@
+diff --git a/warehouse/lifecycle.py b/warehouse/lifecycle.py
+--- a/warehouse/lifecycle.py
++++ b/warehouse/lifecycle.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ 
+ class Catalog:
+     def __init__(self) -> None:

@@ -1,0 +1,15 @@
+diff --git a/warehouse/gold/probe.py b/warehouse/gold/probe.py
+--- a/warehouse/gold/probe.py
++++ b/warehouse/gold/probe.py
+@@ -4,8 +4,7 @@
+ 
+ 
+ def delta_is_nonempty(scan) -> bool:
+-    deduped = scan.unique()
+-    probe = deduped.limit(1)
++    rows = scan.collect()
+     if STREAMING:
+-        return probe.collect(engine="streaming").height > 0
+-    return probe.collect().height > 0
++        return rows.height > 0
++    return rows.height > 0

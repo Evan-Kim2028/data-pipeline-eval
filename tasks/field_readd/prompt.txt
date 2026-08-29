@@ -1,11 +1,9 @@
-Incident:
+A column named note was dropped, then re-added as int.
 
-A column named note was dropped, then re-added as int. Historical
-string values showed up in the new column. The writer reused the
-dropped field identity instead of assigning a new one.
+Historical string values showed up in the new column. Reads of
+note after the re-add mixed old strings with new ints.
+Downstream casts failed around 15:20.
 
-The checkout is warehouse/. Tests call
-warehouse.jobs.schema_evo.drop_and_readd. Re-adding a name must not
-reuse the old field id.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+The writer reused the dropped field's storage identity. Old
+values were still sitting in that slot. New int writes collided
+with leftover strings from before the drop.

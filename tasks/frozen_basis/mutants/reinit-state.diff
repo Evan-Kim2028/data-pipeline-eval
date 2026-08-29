@@ -1,0 +1,17 @@
+diff --git a/warehouse/incremental/basis.py b/warehouse/incremental/basis.py
+--- a/warehouse/incremental/basis.py
++++ b/warehouse/incremental/basis.py
+@@ -7,7 +7,12 @@
+         self.seen: set[str] = set()
+ 
+     def absorb(self, incoming: list[dict]) -> list[dict]:
+-        return list(incoming)
++        self.rows = []
++        self.seen = set()
++        for row in incoming:
++            self.seen.add(row["event_id"])
++            self.rows.append(row)
++        return list(self.rows)
+ 
+ 
+ def merge_always_unique(existing: list[dict], incoming: list[dict], unique_fn) -> list[dict]:

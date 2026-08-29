@@ -9,8 +9,8 @@ exists. Using it on `[]` is the hang. Comment-free sibling in
 `incremental/basis.py`.
 
 **Gold.** If `existing` is empty, return `incoming` and do not call
-`unique_fn`. Overlay: `solutions/frozen_basis/app/basis.py`.
+`unique_fn`.
 
-**Also green.** Unique the incoming chunk against itself with a
-cheap in-memory set, never the planner unique. Tests spy
-`unique_fn` and fail if it is called on first load.
+Canonical file: `warehouse/warehouse/incremental/basis.py`.
+Fault overlay: `tasks/frozen_basis/fault/warehouse/incremental/basis.py`.
+Gold diff: `python scripts/audit_tasks.py --task frozen_basis --show-gold-diff`.

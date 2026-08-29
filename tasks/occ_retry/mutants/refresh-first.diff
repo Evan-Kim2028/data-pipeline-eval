@@ -1,0 +1,21 @@
+diff --git a/warehouse/catalog/retry.py b/warehouse/catalog/retry.py
+--- a/warehouse/catalog/retry.py
++++ b/warehouse/catalog/retry.py
+@@ -5,12 +5,16 @@
+ 
+ 
+ def run_with_retry(table, payload: str, *, max_attempts: int = MAX_COMMIT_ATTEMPTS) -> None:
++    table.refresh()
+     last: Exception | None = None
+-    for _ in range(max_attempts):
++    for attempt in range(max_attempts):
+         try:
+             table.commit(payload)
+             return
+         except CommitConflict as exc:
+             last = exc
++            if attempt == max_attempts - 1:
++                raise
++            table.refresh()
+     if last is not None:
+         raise last

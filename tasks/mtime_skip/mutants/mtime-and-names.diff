@@ -1,0 +1,9 @@
+diff --git a/warehouse/serving_cursors.py b/warehouse/serving_cursors.py
+--- a/warehouse/serving_cursors.py
++++ b/warehouse/serving_cursors.py
+@@ -10,4 +10,4 @@
+     output_mtime: int,
+     processed_names: set[str],
+ ) -> list[dict]:
+-    return [f for f in files if f["mtime"] > output_mtime]
++    return [f for f in files if f["mtime"] > output_mtime and f["name"] not in processed_names]

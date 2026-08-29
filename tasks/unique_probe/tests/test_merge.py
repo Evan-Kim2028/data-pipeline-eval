@@ -32,7 +32,9 @@ def test_nonempty_merge_does_not_unique_the_probe() -> None:
     sink = MemorySink()
     assert merge_delta(scan, sink) == "merged"
     assert sink.writes == ["merged"]
+    assert scan.calls[:2] == ["limit", "collect"]
     assert "unique" not in scan.calls
+    assert "sort" not in scan.calls
 
 
 def test_empty_delta_skips_sink() -> None:

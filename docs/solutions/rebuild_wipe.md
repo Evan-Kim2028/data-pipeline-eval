@@ -7,7 +7,8 @@ rebuild starts at record one and double-applies the prefix.
 must not call it on retry. `last_ok` is the checkpoint.
 
 **Gold.** If `last_ok` is None, return 0. Else persist `last_ok` and
-return `last_ok + 1`. Overlay: `solutions/rebuild_wipe/app/rebuild.py`.
+return `last_ok + 1`.
 
-**Also green.** Copy last_ok into a new staging dict; do not
-`.clear()`. Tests: last_ok=3 → 4, `scratch` key survives.
+Canonical file: `warehouse/warehouse/incremental/rebuild.py`.
+Fault overlay: `tasks/rebuild_wipe/fault/warehouse/incremental/rebuild.py`.
+Gold diff: `python scripts/audit_tasks.py --task rebuild_wipe --show-gold-diff`.

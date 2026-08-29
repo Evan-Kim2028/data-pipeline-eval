@@ -1,10 +1,10 @@
-Incident:
+Nightly entity reload lists keys that changed since the watermark,
+then scans events for those keys.
 
-A nightly reload lists entity keys that changed since the watermark,
-then scans events for those keys. The scan dropped the time
-predicate, so every changed entity reloaded its full history.
+The scan dropped the time bound. Every changed entity reloaded its
+full history. A job that usually takes about 20 minutes ran past
+six hours. RSS climbed. Incremental output restated years of
+events for entities that had one new row.
 
-The checkout is warehouse/. Tests call warehouse.jobs.entity_reload.run.
-Changed keys must still be filtered by event_at >= since.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+Serving lagged. I killed the run at 06:12. The restatement is
+still sitting in gold.

@@ -1,0 +1,11 @@
+diff --git a/warehouse/incremental/basis.py b/warehouse/incremental/basis.py
+--- a/warehouse/incremental/basis.py
++++ b/warehouse/incremental/basis.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ 
+ class FirstLoadState:
+     def __init__(self) -> None:

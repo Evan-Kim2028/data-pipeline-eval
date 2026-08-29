@@ -1,0 +1,11 @@
+diff --git a/warehouse/time/lookback.py b/warehouse/time/lookback.py
+--- a/warehouse/time/lookback.py
++++ b/warehouse/time/lookback.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ from datetime import timedelta
+ 
+ from warehouse.time.clock import local_today

@@ -4,15 +4,15 @@
     python run_providers.py                     # prints this help, exit 2
     python run_providers.py --spend --smoke     # timestamptz_cutoff on z-ai, novita
     python run_providers.py --spend --golden    # 5-task ladder on z-ai, novita
+    python run_providers.py --spend --hard      # very_hard tasks on z-ai, novita
 """
 
 from __future__ import annotations
 
 import argparse
-import ast
+import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -25,8 +25,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from catalog import GOLDEN_IDS, all_ids, default_ids
+from dataclasses import asdict
+
+from campaign_plan import Campaign, CampaignError, expand, load_campaign
+from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
+from contracts import SCHEMA_VERSION, ResponseArtifact, encode_json, environment_digest, git_revision
+from patches import apply_patch
+from prompt_bundle import all_bundles, bundle_for
 from quality import classify
+from sandbox import image_lock
+from trial_store import SpendEvent, TrialStore
 
 ROOT = Path(__file__).resolve().parent
 
@@ -74,6 +82,19 @@ PROVIDER_SEMS: dict[str, threading.Semaphore] = {}
 DEFAULT_JOBS = 8
 PER_PROVIDER = 1
 RETRY_429 = 4
+_GRADE_ENV = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "USER",
+    "LOGNAME",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "PYTHONPATH",
+)
 
 
 def _message_text(msg: dict) -> str:
@@ -95,176 +116,6 @@ def _message_text(msg: dict) -> str:
         if isinstance(val, str) and val.strip():
             return val
     return ""
-
-
-def _extract_python_or_diff(text: str) -> str:
-    if not text:
-        raise RuntimeError("empty model content")
-    blocks = re.findall(r"```(?:diff|patch|python)?\n(.*?)```", text, re.DOTALL)
-    if blocks:
-        return blocks[0]
-    return text
-
-
-def _reset_work(work: Path) -> None:
-    subprocess.run(["git", "checkout", "-q", "--", "."], cwd=work, check=True)
-    subprocess.run(["git", "clean", "-qfd"], cwd=work, check=True)
-
-
-def _changed_paths(work: Path) -> list[Path]:
-    proc = subprocess.run(
-        ["git", "diff", "--name-only"],
-        cwd=work,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return [work / line for line in proc.stdout.splitlines() if line]
-
-
-def _parse_changed_py(work: Path) -> str | None:
-    changed = _changed_paths(work)
-    if not changed:
-        return "apply changed no files"
-    for path in changed:
-        if path.suffix != ".py":
-            continue
-        try:
-            ast.parse(path.read_text())
-        except SyntaxError as exc:
-            return f"{path.relative_to(work).as_posix()}:{exc.lineno} {exc.msg}"
-    return None
-
-
-def _find_line(old: list[str], oi: int, needle: str, window: int = 80) -> int | None:
-    for k in range(oi, min(len(old), oi + window)):
-        if old[k] == needle:
-            return k
-    return None
-
-
-def _apply_hunk_lines(old: list[str], hunk_lines: list[str]) -> list[str]:
-    new: list[str] = []
-    oi = 0
-    for line in hunk_lines:
-        if line.startswith(("@@", "diff ", "index ")):
-            continue
-        if line.startswith("+++") or line.startswith("---"):
-            continue
-        if line.startswith("+"):
-            new.append(line[1:])
-            continue
-        if line.startswith("-"):
-            needle = line[1:]
-            if oi < len(old) and old[oi] == needle:
-                oi += 1
-                continue
-            found = _find_line(old, oi, needle)
-            if found is None:
-                raise RuntimeError(f"minus not found: {needle[:80]}")
-            new.extend(old[oi:found])
-            oi = found + 1
-            continue
-        ctx = line[1:] if line.startswith(" ") else line
-        if oi < len(old) and old[oi] == ctx:
-            new.append(old[oi])
-            oi += 1
-            continue
-        found = _find_line(old, oi, ctx)
-        if found is None:
-            raise RuntimeError(f"context not found: {ctx[:80]}")
-        new.extend(old[oi:found])
-        new.append(old[found])
-        oi = found + 1
-    new.extend(old[oi:])
-    return new
-
-
-def _apply_context_hunks(work: Path, blob: str) -> None:
-    applied = 0
-    parts = re.split(r"(?m)^--- ", blob)
-    for part in parts[1:]:
-        header, _, rest = part.partition("\n")
-        path = header.strip()
-        path = re.sub(r"^a/", "", path)
-        if rest.startswith("+++"):
-            plus, _, rest = rest.partition("\n")
-            alt = plus.replace("+++", "").strip()
-            alt = re.sub(r"^b/", "", alt)
-            if alt and alt != "/dev/null":
-                path = alt
-        target = work / path
-        if not target.is_file():
-            nested = work / "warehouse" / path.removeprefix("warehouse/")
-            if nested.is_file():
-                target = nested
-            else:
-                continue
-        old = target.read_text().splitlines()
-        new = _apply_hunk_lines(old, rest.splitlines())
-        if new != old:
-            target.write_text("\n".join(new) + "\n")
-            applied += 1
-    if applied == 0:
-        raise RuntimeError("context patch changed no files")
-
-
-def _git_apply(work: Path, blob: str, extra: list[str]) -> bool:
-    proc = subprocess.run(
-        ["git", "apply", "--whitespace=nowarn", "--recount", *extra],
-        cwd=work,
-        input=blob.encode(),
-        capture_output=True,
-    )
-    return proc.returncode == 0
-
-
-def _patch_apply(work: Path, blob: str, extra: list[str]) -> bool:
-    proc = subprocess.run(
-        ["patch", "--forward", "--fuzz=0", *extra],
-        cwd=work,
-        input=blob.encode(),
-        capture_output=True,
-    )
-    return proc.returncode == 0
-
-
-def _apply_model_output(work: Path, raw: str) -> None:
-    blob = _extract_python_or_diff(raw)
-    stripped = blob.lstrip()
-    if not stripped.startswith(("diff ", "--- ", "+++ ")):
-        raise RuntimeError("apply_fail: model output was not a unified diff")
-    last = "apply_fail"
-    strategies: list[tuple[str, object]] = [
-        ("git -p0", lambda: _git_apply(work, blob, ["-p0"])),
-        ("git -p1", lambda: _git_apply(work, blob, ["-p1"])),
-        ("git -p2", lambda: _git_apply(work, blob, ["-p2"])),
-        ("patch -p0", lambda: _patch_apply(work, blob, ["-p0"])),
-        ("patch -p1", lambda: _patch_apply(work, blob, ["-p1"])),
-        ("context", lambda: (_apply_context_hunks(work, blob) or True)),
-    ]
-    for name, fn in strategies:
-        _reset_work(work)
-        try:
-            ok = fn()
-        except Exception as exc:
-            last = f"apply_fail:{name}: {exc}"
-            continue
-        if not ok:
-            last = f"apply_fail:{name}"
-            continue
-        err = _parse_changed_py(work)
-        if err is None:
-            return
-        last = f"apply_fail:{name}: {err}"
-    _reset_work(work)
-    raise RuntimeError(last)
-
-
-def _file_tree(root: Path) -> str:
-    return "\n".join(
-        sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
-    )
 
 
 def _delta_piece(delta: dict) -> tuple[str, str]:
@@ -302,10 +153,13 @@ def _tick(task: str, provider: str, t0: float, phase: str, reason_n: int, conten
     _out(line)
 
 
-def _complete(prompt: str, bundle: str, provider: str, *, task: str) -> tuple[str, dict]:
+def _complete(message: str, provider: str, *, task: str, require_parameters: bool = False) -> tuple[str, dict]:
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         raise SystemExit("OPENROUTER_API_KEY is not set")
+    provider_cfg: dict = {"only": [provider], "allow_fallbacks": False}
+    if require_parameters:
+        provider_cfg["require_parameters"] = True
     body = {
         "model": MODEL,
         "temperature": TEMPERATURE,
@@ -313,11 +167,11 @@ def _complete(prompt: str, bundle: str, provider: str, *, task: str) -> tuple[st
         "reasoning": {"effort": REASONING_EFFORT},
         "stream": True,
         "stream_options": {"include_usage": True},
-        "provider": {"only": [provider], "allow_fallbacks": False},
+        "provider": provider_cfg,
         "messages": [
             {
                 "role": "user",
-                "content": prompt + "\n\nCheckout:\n\n" + bundle,
+                "content": message,
             }
         ],
     }
@@ -527,36 +381,15 @@ def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_
     try:
         _out(f">> {task}  {provider}  seeding checkout")
         tmp = _seed_tree(task)
-        tree = _file_tree(tmp)
-        bundle = "File tree:\n" + tree + "\n\nNeighborhood sources (faulted checkout):\n"
-        shown: set[Path] = set()
-        fault_root = ROOT / "tasks" / task / "fault"
-        neighbors: list[Path] = []
-        if fault_root.exists():
-            for p in fault_root.rglob("*.py"):
-                rel = p.relative_to(fault_root)
-                live = tmp / rel
-                if live.is_file():
-                    neighbors.append(live)
-                sib = live.parent
-                if sib.is_dir():
-                    neighbors.extend(sib.glob("*.py"))
-        for live in sorted(set(neighbors)):
-            if live in shown or not live.is_file():
-                continue
-            shown.add(live)
-            rel = live.relative_to(tmp).as_posix()
-            bundle += f"\n## {rel}\n```python\n{live.read_text()}```\n"
         tests = ROOT / "tasks" / task / "tests"
-        held = ROOT / "tasks" / task / "tests_held"
-        prompt = (ROOT / "tasks" / task / "prompt.txt").read_text()
-        bundle += "\nHidden tests (do not edit):\n"
-        for p in sorted(tests.glob("test_*.py")):
-            bundle += f"\n## tests/{p.name}\n```python\n{p.read_text()}```\n"
+        held = ROOT / "tasks" / task / "tests_adjudication"
+        rendered = bundle_for(task, ROOT)
+        row["prompt_sha256"] = rendered.sha256
+        message = rendered.content.decode("utf-8")
         with SEM_LOCK:
             sem = PROVIDER_SEMS.setdefault(provider, threading.Semaphore(PER_PROVIDER))
         with sem:
-            raw, meta = _complete(prompt, bundle, provider, task=task)
+            raw, meta = _complete(message, provider, task=task)
         host_name = meta.get("provider")
         row.update(meta)
         row["provider"] = provider
@@ -566,7 +399,14 @@ def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_
             with SPEND_LOCK:
                 spend[0] += float(meta["cost"])
         _out(f"  {task}/{provider}  applying patch ({meta.get('content_chars', 0)}c)")
-        _apply_model_output(tmp, raw)
+        report = apply_patch(tmp, spec(task), raw.encode() if isinstance(raw, str) else raw)
+        row["patch_status"] = report.status
+        row["patch_sha256"] = report.response_sha256
+        if report.failure is not None:
+            row["error"] = str(report.failure)
+            row["quality"] = report.failure.code
+            _out(f"  {task}/{provider}  {report.failure.code}")
+            raise RuntimeError(str(report.failure))
         row.update(classify(task, tmp))
         _out(f"  {task}/{provider}  pytest shown")
         shown_ok, shown_out = _pytest(tmp, tests)
@@ -632,6 +472,223 @@ def _summary(rows: list[dict], providers: list[str], tasks: tuple[str, ...]) -> 
         _out(f"{p}: {sum(1 for r in subset if r.get('pass'))}/{len(subset)}")
 
 
+def grade_env() -> dict[str, str]:
+    env = {key: os.environ[key] for key in _GRADE_ENV if key in os.environ}
+    for banned in ("OPENROUTER_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        env.pop(banned, None)
+    return env
+
+
+def invoke_grade(artifact_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(ROOT / "grade.py"), "--response", str(artifact_path)],
+        cwd=ROOT,
+        env=grade_env(),
+        capture_output=True,
+        text=True,
+    )
+
+
+def write_response_artifact(results: Path, artifact: ResponseArtifact) -> Path:
+    path = results / "responses" / f"{artifact.candidate_sha256}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(encode_json(artifact) + "\n")
+    os.replace(tmp, path)
+    return path
+
+
+def print_campaign_plan(path: Path) -> int:
+    campaign = load_campaign(path)
+    for row in expand(campaign):
+        print(json.dumps(asdict(row), separators=(",", ":"), sort_keys=True))
+    return 0
+
+
+def local_preflight(campaign: Campaign) -> list[dict]:
+    lock = image_lock()
+    env = environment_digest(ROOT)
+    rows: list[dict] = []
+    hashes = dict(campaign.manifest.prompt_hashes)
+    for task_id in campaign.manifest.task_ids:
+        rendered = bundle_for(task_id, ROOT)
+        ok = rendered.sha256 == hashes[task_id]
+        rows.append(
+            {
+                "kind": "prompt",
+                "task_id": task_id,
+                "ok": ok,
+                "prompt_hash": rendered.sha256,
+            }
+        )
+        if not ok:
+            raise CampaignError(f"prompt hash mismatch for {task_id}")
+    if campaign.grader_image_digest != lock["digest"]:
+        raise CampaignError("grader_image_digest does not match docker/grader-image.json")
+    if campaign.manifest.environment_sha256 != env:
+        raise CampaignError("environment_sha256 does not match pinned environment")
+    for provider in campaign.manifest.requested_providers:
+        rows.append(
+            {
+                "kind": "provider",
+                "requested_provider": provider,
+                "require_parameters": True,
+                "ok": True,
+            }
+        )
+    rows.append(
+        {
+            "kind": "pins",
+            "grader_image_digest": lock["digest"],
+            "environment_sha256": env,
+            "ok": True,
+        }
+    )
+    return rows
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def resume_regrade(campaign: Campaign, results: Path) -> int:
+    store = TrialStore(results)
+    specs = expand(campaign)
+    store.plan(specs)
+    pending = store.pending(specs)
+    for row in pending:
+        state = store.state_of(row.trial_id)
+        if state not in {"response_saved", "graded"}:
+            print(
+                f"resume needs --spend for {row.trial_id} (state={state})",
+                file=sys.stderr,
+            )
+            return 2
+        matches = (
+            list((results / "responses").glob("*.json"))
+            if (results / "responses").is_dir()
+            else []
+        )
+        chosen = None
+        for path in matches:
+            data = json.loads(path.read_text())
+            if data.get("trial_id") == row.trial_id:
+                chosen = path
+                break
+        if chosen is None:
+            print(f"missing response artifact for {row.trial_id}", file=sys.stderr)
+            return 2
+        if state == "response_saved":
+            proc = invoke_grade(chosen)
+            store.append_trial(row, "graded")
+            store.append_trial(row, "terminal")
+            _out(f"{row.trial_id} regraded exit={proc.returncode}")
+        elif state == "graded":
+            store.append_trial(row, "terminal")
+    return 0
+
+
+def run_campaign(campaign: Campaign, results: Path) -> int:
+    store = TrialStore(results)
+    specs = expand(campaign)
+    store.plan(specs)
+    n = max(len(specs), 1)
+    reserve_amt = min(0.25, campaign.spend_cap / n) if campaign.spend_cap else 0.0
+    sha, dirty = git_revision(ROOT)
+    published = sha if not dirty else f"{sha}-dirty"
+    lock = image_lock()
+    env = environment_digest(ROOT)
+    pending = store.pending(specs)
+    for row in pending:
+        totals = store.spend_totals()
+        if totals["exposure"] + reserve_amt > campaign.spend_cap + 1e-9:
+            store.append_trial(row, "terminal")
+            continue
+        store.append_trial(row, "reserved")
+        store.append_spend(
+            SpendEvent(
+                event_id=f"{row.trial_id}:reserve",
+                trial_id=row.trial_id,
+                kind="reserve",
+                amount=reserve_amt,
+                currency="USD",
+                provider_generation_id=None,
+                timestamp=_now(),
+                manifest_hash=row.manifest_hash,
+            )
+        )
+        store.append_trial(row, "dispatched")
+        rendered = bundle_for(row.task_id, ROOT)
+        try:
+            text, meta = _complete(
+                rendered.content.decode("utf-8"),
+                row.requested_provider,
+                task=row.task_id,
+                require_parameters=True,
+            )
+        except Exception as exc:
+            store.append_spend(
+                SpendEvent(
+                    event_id=f"{row.trial_id}:unknown",
+                    trial_id=row.trial_id,
+                    kind="unknown",
+                    amount=reserve_amt,
+                    currency="USD",
+                    provider_generation_id=None,
+                    timestamp=_now(),
+                    manifest_hash=row.manifest_hash,
+                )
+            )
+            store.append_trial(row, "terminal")
+            _out(f"FAIL {row.trial_id} {exc}")
+            continue
+        served = str(meta.get("provider") or row.requested_provider)
+        cost = meta.get("cost")
+        settled = float(cost) if isinstance(cost, (int, float)) else 0.0
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        artifact = ResponseArtifact(
+            schema_version=SCHEMA_VERSION,
+            trial_id=row.trial_id,
+            task_id=row.task_id,
+            candidate_text=text,
+            candidate_sha256=digest,
+            prompt_sha256=row.prompt_hash,
+            model=campaign.manifest.model,
+            requested_provider=row.requested_provider,
+            served_provider=served,
+            generation_id=None if meta.get("id") == "unknown" else str(meta.get("id")),
+            usage={
+                "prompt_tokens": meta.get("prompt_tokens"),
+                "completion_tokens": meta.get("completion_tokens"),
+                "cost": cost if isinstance(cost, (int, float)) else None,
+            },
+            finish_reason=meta.get("finish_reason"),
+            benchmark_repo_sha=published,
+            grader_source_sha=campaign.grader_source_sha,
+            grader_image_digest=lock["digest"],
+            environment_sha256=env,
+        )
+        write_response_artifact(results, artifact)
+        store.append_trial(row, "response_saved")
+        store.append_spend(
+            SpendEvent(
+                event_id=f"{row.trial_id}:settle",
+                trial_id=row.trial_id,
+                kind="settle",
+                amount=settled,
+                currency="USD",
+                provider_generation_id=artifact.generation_id,
+                timestamp=_now(),
+                manifest_hash=row.manifest_hash,
+            )
+        )
+        proc = invoke_grade(results / "responses" / f"{digest}.json")
+        store.append_trial(row, "graded")
+        store.append_trial(row, "terminal")
+        _out(f"{row.trial_id} served={served} grade={proc.returncode}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -650,6 +707,11 @@ def main() -> int:
         action="store_true",
         help="Five-task ladder on z-ai and novita.",
     )
+    ap.add_argument(
+        "--hard",
+        action="store_true",
+        help="All very_hard tasks on z-ai and novita.",
+    )
     ap.add_argument("--providers", default=",".join(DEFAULT_PROVIDERS))
     ap.add_argument(
         "--jobs",
@@ -657,7 +719,69 @@ def main() -> int:
         default=0,
         help="Parallel (task, host) workers. 0 = min(8, number of pairs).",
     )
+    ap.add_argument(
+        "--render-prompt",
+        choices=ALL_TASKS,
+        help="Print the official candidate message for one task. No network.",
+    )
+    ap.add_argument(
+        "--check-prompts",
+        action="store_true",
+        help="Render all official prompts and print SHA-256 digests. No network.",
+    )
+    ap.add_argument("--campaign", type=Path, help="Frozen campaign manifest JSON.")
+    ap.add_argument(
+        "--plan",
+        action="store_true",
+        help="Print the expanded trial plan for --campaign. No network.",
+    )
+    ap.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Validate campaign pins and prompt hashes. No provider spend.",
+    )
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="Finish pending campaign trials. Regrade saved artifacts without --spend.",
+    )
+    ap.add_argument(
+        "--results",
+        type=Path,
+        help="Campaign result directory. Default: results/<campaign_id>.",
+    )
     args = ap.parse_args()
+    if args.check_prompts:
+        for task_id, bundle in all_bundles(ROOT).items():
+            print(f"{task_id} {len(bundle.content)} {bundle.sha256}")
+        return 0
+    if args.render_prompt:
+        sys.stdout.buffer.write(bundle_for(args.render_prompt, ROOT).content)
+        return 0
+    if args.campaign:
+        if args.plan:
+            return print_campaign_plan(args.campaign)
+        campaign = load_campaign(args.campaign)
+        results = args.results or (ROOT / "results" / campaign.manifest.campaign_id)
+        if args.preflight:
+            rows = local_preflight(campaign)
+            results.mkdir(parents=True, exist_ok=True)
+            with (results / "preflight.jsonl").open("w") as fh:
+                for row in rows:
+                    line = json.dumps(row, separators=(",", ":"), sort_keys=True)
+                    print(line)
+                    fh.write(line + "\n")
+            return 0
+        if args.resume and not args.spend:
+            return resume_regrade(campaign, results)
+        if not args.spend:
+            print(
+                "Refusing to call OpenRouter. Pass --spend when you want to burn credits.\n"
+                "Offline: --plan, --preflight, or --resume with saved artifacts.",
+                file=sys.stderr,
+            )
+            return 2
+        return run_campaign(campaign, results)
     if not args.spend:
         print(
             "Refusing to call OpenRouter. Pass --spend when you want to burn credits.\n"
@@ -665,9 +789,11 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    cheap = args.smoke or args.golden
+    cheap = args.smoke or args.golden or args.hard
     if args.task:
         tasks = tuple(args.task)
+    elif args.hard:
+        tasks = hard_ids()
     elif args.golden:
         tasks = GOLDEN_IDS
     elif args.smoke:
@@ -682,14 +808,21 @@ def main() -> int:
     jobs = args.jobs if args.jobs > 0 else min(DEFAULT_JOBS, max(1, len(pairs)))
     spend = [0.0]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    sha, dirty = git_revision(ROOT)
+    published = sha if not dirty else f"{sha}-dirty"
     run_meta = {
+        "schema_version": "1",
         "run_id": run_id,
+        "campaign_id": run_id,
         "ts": datetime.now(timezone.utc).isoformat(),
         "model": MODEL,
         "temperature": TEMPERATURE,
         "max_tokens": MAX_TOKENS,
         "reasoning_effort": REASONING_EFFORT,
         "jobs": jobs,
+        "benchmark_repo_sha": published,
+        "environment_sha256": environment_digest(ROOT),
+        "comparable": not dirty,
     }
     _out(
         f"run {run_id}  {len(pairs)} pairs  jobs={jobs}  "

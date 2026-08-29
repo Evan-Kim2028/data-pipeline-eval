@@ -1,43 +1,55 @@
 # OpenRouter harness for GLM 5.3 Flash
 
-Locked for this gym so a score change is the host or the patch, not
-sampling. Model slug `z-ai/glm-5.3-flash`. Thinking cannot be disabled.
+Locked so a score change is the host or the patch, not sampling.
+Model slug `z-ai/glm-5.3-flash`. Thinking cannot be disabled.
 
 | Setting | Value | Why |
 |---|---|---|
-| `temperature` | `0` | Repeatable host bake-off. Z.ai coding rec is `1.0`; do not also set `top_p`. |
-| `max_tokens` | `131072` | Model max output. A 2500 cap ate reasoning and returned empty `content`. |
-| `reasoning.effort` | `high` | Bake-off default. `max` ran ~6 min of CoT on `schema_infer`. |
+| `temperature` | `0` | Repeatable host bake-off. |
+| `max_tokens` | `131072` | Model max output. |
+| `reasoning.effort` | `high` | Bake-off default. |
 | `provider.only` | one host | No fallback. |
 | `allow_fallbacks` | `false` | Same. |
+| `require_parameters` | `true` | Official campaigns. |
 
-Do not send `top_p` with `temperature` (Z.ai: pick one). Do not send
-`reasoning.max_tokens` (not a GLM knob). Prefer fp8 hosts.
+Official candidate messages come from `prompt_bundle.py`: a stable
+system prefix plus incident, entrypoint, and production context.
+Editable paths are not named. Tests stay in the clone and never
+enter that message.
+`python run_providers.py --check-prompts` reprints SHA-256 digests.
 
-To score the model's ceiling instead of host variance, set
-`temperature` to `1.0` and still omit `top_p`.
+Prefix cache only hits when the **same host** sees the **same full
+prompt** again (k≥2, back-to-back). k=1 unique (task, host) pairs
+should report ~0 `cached_tokens`.
 
-Fixtures: `python scripts/setup_eval.py --seed 42`.
+`--spend --variance` is the original 9 very_hard on z-ai and novita.
+Stay at `-k 1` until that campaign is clean; then `-k 3`. Applied
+diffs: `logs/runs/<run_id>/patches/`. Compare:
+`python scripts/compare_trials.py logs/runs/<id>.jsonl`.
+Held-out fail is `held_fail`, not `equivalent`.
 
-`--spend --smoke` is the e2e check: `timestamptz_cutoff` on `z-ai` and
-`novita`. `--spend --golden` is the five-task ladder (`timestamptz_cutoff`,
-`schema_infer`, `unique_probe`, `latest_pointer`, `watermark_poison`).
-Pytest failures print the error line (not a blank FAIL).
+Candidate responses must contain a unified diff (`diff --git` or
+`--- a/` / `+++ b/`). A markdown fence around the diff is unwrapped.
+Apply rewrites `@@` from unique file context, then
+`git apply --index --whitespace=error -p1` with no fuzz.
 
-`tasks/<id>/tests` are shown in the prompt. `tasks/<id>/tests_held` are
-not. A PASS requires both. After apply, `quality.py` tags the tree
-`gold` (byte-match fault files to the gold warehouse, no extra files),
-`equivalent` (only those files changed), or `other`.
+Offline regrade is `python grade.py --response <artifact.json>`.
+The runner writes a `ResponseArtifact` before `grade.py` starts as a
+separate process with an environment allowlist. The container uses
+`--network=none`, a read-only root, bounded tmpfs, dropped
+capabilities, and a non-root user. Public tests are visible inside
+the container. Resource limits, not secrecy, are the security claim.
 
-Apply is strict: `git apply --recount`, then `patch --fuzz=0`, then a
-context hunk walk. After each strategy the changed `.py` files must
-`ast.parse`. A smashed tree is reverted and scored `apply_fail`, not a
-pytest FAIL. `--fuzz=3` is not used.
+Campaigns:
 
-`--jobs` runs (task, host) pairs in parallel (default `min(8, n_pairs)`).
-One in-flight request per host. HTTP 429 retries with backoff.
-Each pair streams SSE: a line every ~2s with elapsed, phase (`wait` /
-`think` / `patch`), think/patch char counts, and OpenRouter keepalives.
-Rows append to `results.jsonl` and `logs/runs/<run_id>.jsonl` as they
-finish. `logs/LAST_RUN.md` refreshes after each pair. Raw payloads stay
-in `logs/raw-*.json`.
+```sh
+python run_providers.py --campaign campaigns/official-v1.json --plan
+python run_providers.py --campaign campaigns/official-v1.json --preflight
+python run_providers.py --campaign campaigns/official-v1.json --resume
+python report.py --manifest campaigns/official-v1.json --trials results/official-v1/trials.jsonl --out reports/official-v1 --check
+```
+
+`--resume` regrades saved artifacts. `--spend` is required to call
+OpenRouter. Dirty trees are marked `-dirty` and are not comparable.
+Compare published rows only at the frozen `benchmark_repo_sha`,
+`grader_source_sha`, and image digest.

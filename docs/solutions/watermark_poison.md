@@ -9,7 +9,8 @@ says this avoids redoing finished work. `windows.upcoming` is
 correct. `metrics.py` is unused.
 
 **Gold.** `commit(w)` then `store.set(w)`. Overlay:
-`solutions/watermark_poison/app/nightly.py`.
+`warehouse/app/nightly.py`.
 
-**Also green.** Try/finally that only sets on success. Tests: after
-a raise on `2026-05-03`, watermark is `2026-05-02`.
+Canonical file: `warehouse/warehouse/checkpoints/nightly.py`.
+Fault overlay: `tasks/watermark_poison/fault/warehouse/checkpoints/nightly.py`.
+Gold diff: `python scripts/audit_tasks.py --task watermark_poison --show-gold-diff`.

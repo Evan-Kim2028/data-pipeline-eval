@@ -1,0 +1,11 @@
+diff --git a/warehouse/silver/schema.py b/warehouse/silver/schema.py
+--- a/warehouse/silver/schema.py
++++ b/warehouse/silver/schema.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ from warehouse.settings import INFER_SAMPLE
+ 
+ 

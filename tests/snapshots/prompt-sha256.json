@@ -1,0 +1,66 @@
+{
+  "generated_by": "prompt_bundle.py",
+  "schema_version": "1",
+  "tasks": {
+    "drop_resurrect": {
+      "byte_length": 1715,
+      "sha256": "99d7c58e51772e5b301563472409b1548e6411c8b9f9c354d98d89f27c0b427a"
+    },
+    "entity_reload": {
+      "byte_length": 2249,
+      "sha256": "acb82436d98e5e05542ce961b6c7b25b151428e0dbce4fc0a74e1ca090a647fa"
+    },
+    "field_readd": {
+      "byte_length": 2219,
+      "sha256": "a75a788676e14b2b794f6a047b46a56d8d01b2ab9866501ab3b55a708b9e19d6"
+    },
+    "frozen_basis": {
+      "byte_length": 1568,
+      "sha256": "13913d8e3b814e215db0c2eea4f3079bf26aa4a40651577baa931c7f5c7821dc"
+    },
+    "late_event_close": {
+      "byte_length": 2244,
+      "sha256": "91adfa895028d0241235e455e39d333939fbd09f913bbf0ab31bdad7d16e00bb"
+    },
+    "latest_pointer": {
+      "byte_length": 1960,
+      "sha256": "e7db36aa217ef5cad797813af1a73baaf8cb9589a50cc5857ab2cba2be5eda00"
+    },
+    "mtime_skip": {
+      "byte_length": 1387,
+      "sha256": "1ef1ac39aed7e6e5873d768ae452cdf82017d3229b44d8fb9404b5ef29cd2cea"
+    },
+    "occ_retry": {
+      "byte_length": 1460,
+      "sha256": "5288f0711c6547eb4a68d1b46bd5e802122c2cec91fd58af77b501f593edb365"
+    },
+    "read_write_split": {
+      "byte_length": 1547,
+      "sha256": "dc25aa118eba263e8ed42d3b206f5254f73688492db906dfaf4b90e6374229f0"
+    },
+    "rebuild_wipe": {
+      "byte_length": 1170,
+      "sha256": "d2d59689b84a68d6ebde391238469786154b0b7c4c0d809ac564ce34ec5763f1"
+    },
+    "schema_infer": {
+      "byte_length": 1831,
+      "sha256": "36ce8c597ed65ca3dd2c83cf4ce058e9c560ce362ddea3f4468ec2711712e639"
+    },
+    "timestamptz_cutoff": {
+      "byte_length": 1580,
+      "sha256": "de67273454967f407634208731b446e355ff1de271fdc41224ef27b2352a947e"
+    },
+    "unique_probe": {
+      "byte_length": 1314,
+      "sha256": "272e2bac60791e10280efad1254386b76eb1d74d807ef5b1f849e479a1c4f2c0"
+    },
+    "utc_lookback": {
+      "byte_length": 1230,
+      "sha256": "2d8a9f24d5d57b8db1e4026a814befb3cc67c979ac5927284d4ac1dc9dd2dae7"
+    },
+    "watermark_poison": {
+      "byte_length": 1329,
+      "sha256": "ead6d6627506ed6b65a2cbce6fd22ac69457c2a37ab4bf3529e43026e8dae973"
+    }
+  }
+}

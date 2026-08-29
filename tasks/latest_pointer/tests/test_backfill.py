@@ -20,3 +20,19 @@ def test_backfill_does_not_move_latest_onto_the_oldest_day() -> None:
     assert day_key(oldest) in store
     assert day_key(today - timedelta(days=1)) in store
     assert store[day_key(today)] == "today-mark"
+
+
+def test_backfill_never_writes_latest_keys() -> None:
+    today = date(2026, 8, 4)
+    store: dict[str, str] = {}
+    publish_today(store, today, "today-mark")
+
+    class Guard(dict):
+        def __setitem__(self, key, value):
+            if key in {"latest", "latest_as_of"}:
+                raise AssertionError(key)
+            super().__setitem__(key, value)
+
+    guarded = Guard(store)
+    backfill(guarded, today, 5, payload_for=lambda d: f"p-{d.isoformat()}")
+    assert current_as_of(guarded) == today.isoformat()

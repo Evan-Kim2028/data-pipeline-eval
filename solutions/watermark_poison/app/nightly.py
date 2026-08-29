@@ -1,9 +1,0 @@
-from __future__ import annotations
-
-from app.windows import upcoming
-
-
-def drain(windows: list[str], *, store, commit) -> None:
-    for w in upcoming(windows, store.get()):
-        commit(w)
-        store.set(w)

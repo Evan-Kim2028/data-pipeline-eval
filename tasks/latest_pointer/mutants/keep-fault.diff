@@ -1,0 +1,11 @@
+diff --git a/warehouse/history/backfill.py b/warehouse/history/backfill.py
+--- a/warehouse/history/backfill.py
++++ b/warehouse/history/backfill.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++_keep_fault = True
++
+ from datetime import date, timedelta
+ 
+ from warehouse.history.sidecar import write_latest, write_partition

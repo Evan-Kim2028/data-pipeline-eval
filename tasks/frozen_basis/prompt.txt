@@ -1,11 +1,9 @@
-Incident:
+First load of an empty gold table.
 
-First load of an empty table unique()d each incoming chunk against a
-start-of-run snapshot that had no rows. unique() still planned a full
-dedupe of the chunk. RSS climbed; the job never wrote.
+Each incoming chunk was uniqued against a start-of-run snapshot
+that had no rows. unique still planned a full dedupe of the chunk.
 
-The checkout is warehouse/. Tests call
-warehouse.jobs.frozen_basis.merge_first_load. An empty existing
-snapshot must not call unique.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+RSS climbed. The job never wrote. An empty-table first load hung
+until the worker was cycled at 11:40. Nothing landed in gold.
+Retrying the same load hung the same way. Serving still has no
+rows for that table.

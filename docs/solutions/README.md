@@ -1,11 +1,15 @@
 # Gold solutions
 
-Each default task has:
+`warehouse/` is the only executable gold. Each task overlays one
+fault onto that tree. Explanations in this directory are prose.
 
-- Gold code lives in `warehouse/` (the un-faulted monorepo).
-- `tasks/<id>/fault/` is the production bug overlay (`python verify.py`).
-- `docs/solutions/<task>.md` — what broke, the trap, the gold patch,
-  and which other patches still count.
-- `solutions/` keeps the gold file copies for the write-ups.
+Generate the official gold unified diff with:
 
-Categories and difficulty bands: `docs/TAXONOMY.md`, `catalog.py`.
+```sh
+python scripts/audit_tasks.py --task unique_probe --show-gold-diff
+```
+
+`python scripts/audit_tasks.py` checks every catalog task: both public
+test tiers fail on the fault, the generated gold patch applies
+strictly and passes, and every registered mutant applies and fails.
+Official candidate messages omit these files.

@@ -3,7 +3,7 @@
 Public gym for data-pipeline incidents. Generic lakehouse, not a
 product dump. Names are directory ids. **Category** clusters them;
 **difficulty** is estimated (`docs/TAXONOMY.md`). Catalog:
-`catalog.py`.
+`catalog.py`. Fifteen tasks. Anyone can clone and grade.
 
 | Task | Category | Difficulty | Suite |
 |---|---|---|---|
@@ -23,19 +23,28 @@ product dump. Names are directory ids. **Category** clusters them;
 | `timestamptz_cutoff` | schema | easy | calibration |
 | `utc_lookback` | time | med | calibration |
 
-Fixtures are synthetic jsonl (`entity_id` / `event_at` / `amount` /
-`source`). Ingest is local files only. Same seed rebuilds them.
-
-Incidents sit in a shared `warehouse/` tree (ingest/silver/gold/catalog/
-history/ops/sources). Each task applies a one-file `fault/` overlay.
-Shown tests grade the failure mode; `tests_held/` is not sent to the
-model. Gold is the un-faulted tree plus
-`docs/solutions/`. Python in `warehouse/` and `tasks/` has no inline
-comments; docs stay in `docs/`.
+Practice tests (`tasks/<id>/tests`) and adjudication tests
+(`tasks/<id>/tests_adjudication`) are public. Official candidate
+messages omit both. Gold is the un-faulted `warehouse/` tree.
+Explanations live in `docs/solutions/` as prose. Comparable rows
+need a full `benchmark_repo_sha`, `grader_source_sha`, immutable
+grader image digest, prompt hash, and `environment_sha256`.
 
 ```sh
-python scripts/setup_eval.py --seed 42    # synthetic jsonl + partitions
-python verify.py                          # starters red, gold green
-python run_providers.py --spend --smoke    # timestamptz_cutoff on z-ai + novita
-python run_providers.py --spend --golden   # 5-task ladder on those two hosts
+python -m pip install --require-hashes -r requirements.lock
+python scripts/setup_eval.py --seed 42
+python verify.py --validate-catalog
+python verify.py
+python scripts/audit_tasks.py
+python run_providers.py --check-prompts
+python run_providers.py --campaign campaigns/official-v1.json --plan
+python run_providers.py --campaign campaigns/official-v1.json --preflight
+python grade.py --response saved-response.json
+python report.py --manifest campaigns/official-v1.json --trials results/official-v1/trials.jsonl --out reports/official-v1
+python report.py --manifest campaigns/official-v1.json --trials results/official-v1/trials.jsonl --out reports/official-v1 --check
+python scripts/check_release.py
 ```
+
+`--spend` is required for provider calls. Frozen campaigns pin the
+public clone, grader image, and prompt hashes. Resume regrades a saved
+`ResponseArtifact` without another request.

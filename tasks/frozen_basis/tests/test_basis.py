@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from warehouse.incremental.basis import merge_incoming
+from warehouse.incremental.basis import FirstLoadState, merge_incoming
 from warehouse.jobs.frozen_basis import merge_first_load
 
 
@@ -41,3 +41,22 @@ def test_unique_is_not_required_on_first_load() -> None:
         merge_first_load([{"event_id": "a"}], lambda rows: (_ for _ in ()).throw(MemoryError("unique")))
     except MemoryError:
         pytest.fail("unique() was planned on an empty existing snapshot")
+
+
+def test_first_load_state_dedupes_across_chunks() -> None:
+    state = FirstLoadState()
+    first = state.absorb([{"event_id": "a"}, {"event_id": "a"}])
+    second = state.absorb([{"event_id": "a"}, {"event_id": "b"}])
+    assert [row["event_id"] for row in first] == ["a"]
+    assert [row["event_id"] for row in second] == ["a", "b"]
+
+
+def test_supplied_existing_basis_still_calls_unique() -> None:
+    calls: list[int] = []
+
+    def unique_fn(rows):
+        calls.append(len(rows))
+        return rows
+
+    merge_incoming([{"event_id": "a"}], [{"event_id": "b"}], unique_fn)
+    assert calls == [2]

@@ -1,0 +1,12 @@
+diff --git a/warehouse/event_time.py b/warehouse/event_time.py
+--- a/warehouse/event_time.py
++++ b/warehouse/event_time.py
+@@ -11,7 +11,7 @@
+     def ingest(self, events: list[dict], closed_processing_at: str) -> list[dict]:
+         for event in events:
+             if start_bound(event, self.start, self.end) and event["processing_at"] <= closed_processing_at:
+-                self.facts[event["event_id"]] = event
++                self.facts[event["event_id"]+str(len(self.facts))] = event
+         return list(self.facts.values())
+ 
+ 

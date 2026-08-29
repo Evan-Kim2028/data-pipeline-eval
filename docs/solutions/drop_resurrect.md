@@ -9,7 +9,8 @@ with none of the dropped rows.
 tombstone.
 
 **Gold.** `get_or_create` must go through `create` (or raise on
-tombstone). Overlay: `solutions/drop_resurrect/app/lifecycle.py`.
+tombstone).
 
-**Also green.** Explicit `if name in tombstones: raise`. Tests:
-open_for_write after drop raises `dropped:gold.events`.
+Canonical file: `warehouse/warehouse/lifecycle.py`.
+Fault overlay: `tasks/drop_resurrect/fault/warehouse/lifecycle.py`.
+Gold diff: `python scripts/audit_tasks.py --task drop_resurrect --show-gold-diff`.

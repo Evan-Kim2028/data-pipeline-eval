@@ -9,8 +9,8 @@ as today.
 `serve.py` trusts `latest_as_of`.
 
 **Gold.** Backfill writes day partitions only. Do not call
-`write_latest`. Overlay: `solutions/latest_pointer/app/backfill.py`.
+`write_latest`.
 
-**Also green.** Pass a flag `update_latest=False`; restore latest to
-the pre-seeded today after the loop. Tests: pointer stays today,
-all 90 keys exist.
+Canonical file: `warehouse/warehouse/history/backfill.py`.
+Fault overlay: `tasks/latest_pointer/fault/warehouse/history/backfill.py`.
+Gold diff: `python scripts/audit_tasks.py --task latest_pointer --show-gold-diff`.

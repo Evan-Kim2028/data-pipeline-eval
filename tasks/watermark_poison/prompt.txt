@@ -1,10 +1,10 @@
-Incident:
+Nightly window-drain walks date windows and stores a watermark of
+the last window it finished.
 
-A nightly job walks date windows and stores a watermark of the last
-window it finished. On a mid-loop abort the watermark had already
-moved, so the next nightly skipped the uncommitted window.
+On a mid-loop abort the watermark had already moved. The window
+that raised never committed. The next nightly skipped it because
+the watermark said that window was done.
 
-The checkout is warehouse/. commit(w) applies the window and may raise.
-A window that did not commit must not be watermarked.
-
-Return a unified diff against warehouse/. Do not rewrite tests.
+Gold has a gap for that date. Re-running the job does not fill it.
+Ops thought the night was complete. Analysts found the missing
+day the next morning.

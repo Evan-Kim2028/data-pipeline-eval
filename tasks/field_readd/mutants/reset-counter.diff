@@ -1,0 +1,17 @@
+diff --git a/warehouse/schema_evo.py b/warehouse/schema_evo.py
+--- a/warehouse/schema_evo.py
++++ b/warehouse/schema_evo.py
+@@ -17,12 +17,9 @@
+     def drop_field(self, name: str) -> None:
+         if name in self.fields:
+             self._dropped[name] = self.fields.pop(name)
++        self._next_id = 1
+ 
+     def readd_field(self, name: str, typ: str) -> int:
+-        if name in self._dropped:
+-            fid, _typ = self._dropped[name]
+-            self.fields[name] = (fid, typ)
+-            return fid
+         return self.add_field(name, typ)
+ 
+     def append_row(self, values: dict[str, object]) -> None:

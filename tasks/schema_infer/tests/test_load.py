@@ -25,3 +25,8 @@ def test_fixture_batch_has_mixed_ids() -> None:
     got = load_listing_ids(FIXTURE.read_text().splitlines())
     assert got[0] == "10000000"
     assert got[-1] == "550e8400-e29b-41d4-a716-446655440000"
+
+
+def test_empty_and_one_row_batches_are_valid() -> None:
+    assert load_listing_ids([]) == []
+    assert load_listing_ids(['{"listing_id": "7"}']) == ["7"]

@@ -1,0 +1,23 @@
+diff --git a/warehouse/lifecycle.py b/warehouse/lifecycle.py
+--- a/warehouse/lifecycle.py
++++ b/warehouse/lifecycle.py
+@@ -7,10 +7,7 @@
+         self.tombstones: set[str] = set()
+ 
+     def create(self, name: str) -> dict:
+-        if name in self.tombstones:
+-            raise RuntimeError(f"dropped:{name}")
+-        self.tables[name] = {}
+-        return self.tables[name]
++        raise RuntimeError(f"dropped:{name}")
+ 
+     def drop(self, name: str) -> None:
+         self.tables.pop(name, None)
+@@ -19,6 +16,4 @@
+     def get_or_create(self, name: str) -> dict:
+         if name in self.tables:
+             return self.tables[name]
+-        self.tables[name] = {}
+-        self.tombstones.discard(name)
+-        return self.tables[name]
++        return self.create(name)
