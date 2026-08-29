@@ -71,6 +71,11 @@ def summarize(rows: list[dict]) -> dict:
             if str(r.get("quality") or "").startswith("invalid_patch")
             or "no file hunks" in str(r.get("error") or "")
         )
+        infra_fail = sum(
+            1
+            for r in subset
+            if "HTTP " in str(r.get("error") or "") or "429" in str(r.get("error") or "")
+        )
         hosts.append(
             {
                 "provider": p,
@@ -79,6 +84,7 @@ def summarize(rows: list[dict]) -> dict:
                 "rate": n_pass / n if n else 0.0,
                 "qualities": dict(qualities),
                 "format_fail": format_fail,
+                "infra_fail": infra_fail,
                 "cost_sum": sum(cost_ok) if cost_ok else 0.0,
                 "cost_mean": _mean(cost_ok),
                 "reason_mean": _mean(reason_ok),
@@ -103,13 +109,23 @@ def summarize(rows: list[dict]) -> dict:
                 ]
                 cells[p] = match[0] if match else None
             grid.append({"task": task, "trial": trial, "cells": cells})
+    run_ids = []
+    shas = []
+    for row in rows:
+        rid = str(row.get("run_id") or "")
+        if rid and rid not in run_ids:
+            run_ids.append(rid)
+        sha = str(row.get("benchmark_repo_sha") or "")
+        if sha and sha not in shas:
+            shas.append(sha)
     meta = rows[0] if rows else {}
     return {
-        "run_id": meta.get("run_id"),
+        "run_id": " + ".join(run_ids) if run_ids else meta.get("run_id"),
+        "run_ids": run_ids,
         "model": meta.get("model"),
         "k": meta.get("k"),
-        "comparable": meta.get("comparable"),
-        "sha": meta.get("benchmark_repo_sha"),
+        "comparable": all(bool(r.get("comparable")) for r in rows) if rows else False,
+        "sha": " ".join(shas),
         "n": len(rows),
         "providers": providers,
         "tasks": tasks,
@@ -141,15 +157,15 @@ def markdown(summary: dict) -> str:
         "",
         "## Host totals",
         "",
-        "| provider | pass | rate | gold | equivalent | broken | format | cost sum | mean reason_tok | mean completion | reason/completion | mean cached | cached>0 | mean latency_s |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| provider | pass | rate | gold | equivalent | broken | format | infra | cost sum | mean reason_tok | mean completion | reason/completion | mean cached | cached>0 | mean latency_s |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for h in hosts:
         q = h["qualities"]
         lines.append(
             f"| {h['provider']} | {h['n_pass']}/{h['n']} | {_fmt(h['rate'], 3)} | "
             f"{q.get('gold', 0)} | {q.get('equivalent', 0)} | {q.get('broken', 0)} | "
-            f"{h['format_fail']} | {_fmt(h['cost_sum'], 4)} | {_fmt(h['reason_mean'], 1)} | "
+            f"{h['format_fail']} | {h['infra_fail']} | {_fmt(h['cost_sum'], 4)} | {_fmt(h['reason_mean'], 1)} | "
             f"{_fmt(h['completion_mean'], 1)} | {_fmt(h['reason_share_mean'], 3)} | "
             f"{_fmt(h['cached_mean'], 1)} | {h['cached_nonzero']} | {_fmt(h['latency_mean'], 1)} |"
         )
@@ -236,6 +252,7 @@ def html_doc(summary: dict) -> str:
                     q.get("equivalent", 0),
                     q.get("broken", 0),
                     h["format_fail"],
+                    h["infra_fail"],
                     _fmt(h["cost_sum"], 4),
                     _fmt(h["reason_mean"], 1),
                     _fmt(h["completion_mean"], 1),
@@ -300,7 +317,7 @@ no agent loop, and no hop-span traces. Reasoning efficiency here is
 <p>Do not read a winner rank out of these rates. k is small. Several tasks stay red on both hosts.</p>
 <h2>Host totals</h2>
 <table>
-<tr><th>provider</th><th>pass</th><th>rate</th><th>gold</th><th>equivalent</th><th>broken</th><th>format</th><th>cost sum</th><th>mean reason_tok</th><th>mean completion</th><th>reason/completion</th><th>mean cached</th><th>cached&gt;0</th><th>mean latency_s</th></tr>
+<tr><th>provider</th><th>pass</th><th>rate</th><th>gold</th><th>equivalent</th><th>broken</th><th>format</th><th>infra</th><th>cost sum</th><th>mean reason_tok</th><th>mean completion</th><th>reason/completion</th><th>mean cached</th><th>cached&gt;0</th><th>mean latency_s</th></tr>
 {''.join(host_rows)}
 </table>
 <h2>Per task / trial</h2>
