@@ -1,0 +1,14 @@
+diff --git a/warehouse/checkpoints/nightly.py b/warehouse/checkpoints/nightly.py
+--- a/warehouse/checkpoints/nightly.py
++++ b/warehouse/checkpoints/nightly.py
+@@ -4,6 +4,8 @@
+ 
+ 
+ def drain(windows: list[str], *, store, commit) -> None:
+-    for w in upcoming(windows, store.get()):
+-        store.set(w)
++    last = store.get()
++    for w in upcoming(windows, last):
+         commit(w)
++    if windows:
++        store.set(windows[-1])
