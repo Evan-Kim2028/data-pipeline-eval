@@ -1,0 +1,25 @@
+diff --git a/warehouse/incremental/reload.py b/warehouse/incremental/reload.py
+--- a/warehouse/incremental/reload.py
++++ b/warehouse/incremental/reload.py
+@@ -8,13 +8,12 @@
+         self.collected = False
+ 
+     def where_entity_in(self, ids: set[str]) -> EventScan:
+-        wanted = set(ids)
+-        self.predicates.append(("entity_in", frozenset(wanted)))
+-        self._rows = [row for row in self._rows if row["entity_id"] in wanted]
++        self.predicates.append(("entity_in", frozenset(ids)))
+         return self
+ 
+     def where_event_at_since(self, since: str) -> EventScan:
+         self.predicates.append(("event_at_since", since))
++        self._rows = [row for row in self._rows if row["event_at"] >= since]
+         return self
+ 
+     def collect(self) -> list[dict]:
+@@ -27,4 +26,4 @@
+ 
+ 
+ def load_changed(events: list[dict], changed_ids: set[str], since: str) -> list[dict]:
+-    return EventScan(events).where_entity_in(changed_ids).collect()
++    return EventScan(events).where_event_at_since(since).collect()
