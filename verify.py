@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Red starters (warehouse + fault) / green gold warehouse. No network.
 
-Shown tests: tasks/<id>/tests
-Held-out tests: tasks/<id>/tests_held (not sent to the model)
+Practice tests: tasks/<id>/tests
+Adjudication tests: tasks/<id>/tests_held (public, omitted from official prompts)
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -14,7 +15,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from catalog import all_ids
+from catalog import all_ids, spec, validate_catalog
+from checkouts import materialize
+from contracts import python_version_pin
 
 ROOT = Path(__file__).resolve().parent
 WAREHOUSE = ROOT / "warehouse"
@@ -44,11 +47,43 @@ def _tree_with_fault(task: str) -> Path:
 
 
 def _suite(task: str) -> tuple[Path, Path]:
-    base = ROOT / "tasks" / task
-    return base / "tests", base / "tests_held"
+    item = spec(task)
+    return (
+        ROOT / item.practice_tests_repo_path.value,
+        ROOT / item.adjudication_tests_repo_path.value,
+    )
+
+
+def _validate_catalog() -> int:
+    errors = validate_catalog(ROOT)
+    if errors:
+        for err in errors:
+            print(f"FAIL catalog: {err}")
+        return 1
+    for task_id in TASKS:
+        materialize(spec(task_id), ROOT)
+        print(f"ok   {task_id}")
+    print(f"{len(TASKS)} tasks")
+    return 0
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--validate-catalog",
+        action="store_true",
+        help="Validate TaskSpec records and materialize checkouts only.",
+    )
+    args = ap.parse_args()
+    pin = python_version_pin(ROOT)
+    running = sys.version_info[:3]
+    if running != pin:
+        print(f"WARN python {running} != pin {pin}", file=sys.stderr)
+    catalog_rc = _validate_catalog()
+    if args.validate_catalog:
+        return catalog_rc
+    if catalog_rc != 0:
+        return catalog_rc
     failed = 0
     for task in TASKS:
         shown, held = _suite(task)

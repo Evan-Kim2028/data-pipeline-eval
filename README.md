@@ -28,13 +28,17 @@ Fixtures are synthetic jsonl (`entity_id` / `event_at` / `amount` /
 
 Incidents sit in a shared `warehouse/` tree (ingest/silver/gold/catalog/
 history/ops/sources). Each task applies a one-file `fault/` overlay.
-Shown tests grade the failure mode; `tests_held/` is not sent to the
-model. Gold is the un-faulted tree plus
-`docs/solutions/`. Python in `warehouse/` and `tasks/` has no inline
+Practice tests (`tasks/<id>/tests`) and adjudication tests
+(`tasks/<id>/tests_held`) are public. Official candidate messages omit
+both. Gold is the un-faulted `warehouse/` tree plus `docs/solutions/`.
+Comparable published rows must include a full `benchmark_repo_sha` and
+`environment_sha256`. Python in `warehouse/` and `tasks/` has no inline
 comments; docs stay in `docs/`.
 
 ```sh
+python -m pip install --require-hashes -r requirements.lock
 python scripts/setup_eval.py --seed 42    # synthetic jsonl + partitions
+python verify.py --validate-catalog       # 15 TaskSpec records
 python verify.py                          # starters red, gold green
 python run_providers.py --spend --smoke    # timestamptz_cutoff on z-ai + novita
 python run_providers.py --spend --golden   # 5-task ladder on those two hosts

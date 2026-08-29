@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids
+from contracts import environment_digest, git_revision
 from quality import classify
 
 ROOT = Path(__file__).resolve().parent
@@ -130,10 +131,15 @@ def _parse_changed_py(work: Path) -> str | None:
     for path in changed:
         if path.suffix != ".py":
             continue
+        rel = path.relative_to(work).as_posix()
         try:
-            ast.parse(path.read_text())
+            src = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            return f"{rel}: not utf-8 ({exc.reason})"
+        try:
+            ast.parse(src)
         except SyntaxError as exc:
-            return f"{path.relative_to(work).as_posix()}:{exc.lineno} {exc.msg}"
+            return f"{rel}:{exc.lineno} {exc.msg}"
     return None
 
 
@@ -141,6 +147,11 @@ def _find_line(old: list[str], oi: int, needle: str, window: int = 80) -> int | 
     for k in range(oi, min(len(old), oi + window)):
         if old[k] == needle:
             return k
+    stripped = needle.strip()
+    if stripped:
+        for k in range(oi, min(len(old), oi + window)):
+            if old[k].strip() == stripped:
+                return k
     return None
 
 
@@ -220,14 +231,37 @@ def _git_apply(work: Path, blob: str, extra: list[str]) -> bool:
     return proc.returncode == 0
 
 
-def _patch_apply(work: Path, blob: str, extra: list[str]) -> bool:
-    proc = subprocess.run(
-        ["patch", "--forward", "--fuzz=0", *extra],
-        cwd=work,
-        input=blob.encode(),
-        capture_output=True,
-    )
-    return proc.returncode == 0
+def _split_file_diffs(blob: str) -> list[str]:
+    parts = re.split(r"(?m)(?=^--- )", blob)
+    return [p for p in parts if p.lstrip().startswith("--- ")]
+
+
+def _revert_new(work: Path, before: set[Path]) -> None:
+    for path in _changed_paths(work):
+        if path in before:
+            continue
+        rel = path.relative_to(work).as_posix()
+        subprocess.run(["git", "checkout", "-q", "--", rel], cwd=work, check=False)
+
+
+def _try_blob(work: Path, blob: str) -> str | None:
+    before = set(_changed_paths(work))
+    for extra in (["-p0"], ["-p1"], ["-p2"]):
+        if _git_apply(work, blob, extra):
+            err = _parse_changed_py(work)
+            if err is None:
+                return None
+            _revert_new(work, before)
+    try:
+        _apply_context_hunks(work, blob)
+    except Exception as exc:
+        _revert_new(work, before)
+        return str(exc)
+    err = _parse_changed_py(work)
+    if err is None:
+        return None
+    _revert_new(work, before)
+    return err
 
 
 def _apply_model_output(work: Path, raw: str) -> None:
@@ -236,28 +270,25 @@ def _apply_model_output(work: Path, raw: str) -> None:
     if not stripped.startswith(("diff ", "--- ", "+++ ")):
         raise RuntimeError("apply_fail: model output was not a unified diff")
     last = "apply_fail"
-    strategies: list[tuple[str, object]] = [
-        ("git -p0", lambda: _git_apply(work, blob, ["-p0"])),
-        ("git -p1", lambda: _git_apply(work, blob, ["-p1"])),
-        ("git -p2", lambda: _git_apply(work, blob, ["-p2"])),
-        ("patch -p0", lambda: _patch_apply(work, blob, ["-p0"])),
-        ("patch -p1", lambda: _patch_apply(work, blob, ["-p1"])),
-        ("context", lambda: (_apply_context_hunks(work, blob) or True)),
-    ]
-    for name, fn in strategies:
+    for extra in (["-p0"], ["-p1"], ["-p2"]):
         _reset_work(work)
-        try:
-            ok = fn()
-        except Exception as exc:
-            last = f"apply_fail:{name}: {exc}"
-            continue
-        if not ok:
-            last = f"apply_fail:{name}"
+        if not _git_apply(work, blob, extra):
+            last = f"apply_fail:git {extra[0]}"
             continue
         err = _parse_changed_py(work)
         if err is None:
             return
-        last = f"apply_fail:{name}: {err}"
+        last = f"apply_fail:git {extra[0]}: {err}"
+    _reset_work(work)
+    n_ok = 0
+    for chunk in _split_file_diffs(blob) or [blob]:
+        err = _try_blob(work, chunk)
+        if err is None:
+            n_ok += 1
+        else:
+            last = f"apply_fail:file: {err}"
+    if n_ok and _parse_changed_py(work) is None:
+        return
     _reset_work(work)
     raise RuntimeError(last)
 
@@ -690,14 +721,21 @@ def main() -> int:
     jobs = args.jobs if args.jobs > 0 else min(DEFAULT_JOBS, max(1, len(pairs)))
     spend = [0.0]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    sha, dirty = git_revision(ROOT)
+    published = sha if not dirty else f"{sha}-dirty"
     run_meta = {
+        "schema_version": "1",
         "run_id": run_id,
+        "campaign_id": run_id,
         "ts": datetime.now(timezone.utc).isoformat(),
         "model": MODEL,
         "temperature": TEMPERATURE,
         "max_tokens": MAX_TOKENS,
         "reasoning_effort": REASONING_EFFORT,
         "jobs": jobs,
+        "benchmark_repo_sha": published,
+        "environment_sha256": environment_digest(ROOT),
+        "comparable": not dirty,
     }
     _out(
         f"run {run_id}  {len(pairs)} pairs  jobs={jobs}  "
