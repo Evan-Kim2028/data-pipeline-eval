@@ -85,9 +85,15 @@ def parse_unified_diff(raw: bytes, allowed: tuple[str, ...]) -> ValidatedPatch:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise _fail(FORMAT, INVALID_PATCH_FORMAT, "not utf-8") from exc
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     if "```" in text:
-        raise _fail(FORMAT, INVALID_PATCH_FORMAT, "markdown fence")
-    body = text.replace("\r\n", "\n").replace("\r", "\n")
+        blocks = re.findall(r"```[^\n]*\n(.*?)```", text, re.DOTALL)
+        if not blocks:
+            raise _fail(FORMAT, INVALID_PATCH_FORMAT, "markdown fence")
+        text = blocks[0]
+        if not text.endswith("\n"):
+            text += "\n"
+    body = text
     if not body.startswith(("diff --git ", "--- a/")):
         raise _fail(FORMAT, INVALID_PATCH_FORMAT, "not a bare unified diff")
     if "GIT binary patch" in body or "\nrename from " in body or "\ncopy from " in body:
@@ -191,6 +197,25 @@ def apply_patch(work: Path, task: TaskSpec, raw: bytes) -> PatchReport:
         subprocess.run(["git", "reset", "--hard", "-q"], cwd=work, check=False)
         return PatchReport(task.id, parsed.sha256, "failed", (), failure)
     return PatchReport(task.id, parsed.sha256, "applied", tuple(changed), None)
+
+
+def gold_unified_diff(root: Path, task: TaskSpec) -> bytes:
+    if len(task.editable_checkout_paths) != 1:
+        raise PatchFailure(POLICY, PATCH_POLICY_REJECTED, "gold diff expects one editable path")
+    rel = task.editable_checkout_paths[0].value
+    old = root / task.fault_repo_path.value / rel
+    new = root / task.gold_repo_path.value
+    proc = subprocess.run(
+        ["diff", "-u", "--label", f"a/{rel}", "--label", f"b/{rel}", str(old), str(new)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode not in (0, 1):
+        raise PatchFailure(FORMAT, INVALID_PATCH_FORMAT, "gold diff failed")
+    body = proc.stdout
+    if not body.endswith("\n"):
+        body += "\n"
+    return f"diff --git a/{rel} b/{rel}\n{body}".encode()
 
 
 def apply_task_patch(root: Path, work: Path, task_id: str, raw: bytes) -> PatchReport:

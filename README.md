@@ -43,4 +43,12 @@ python verify.py                          # starters red, gold green
 python run_providers.py --spend --smoke    # timestamptz_cutoff on z-ai + novita
 python run_providers.py --spend --golden   # 5-task ladder on those two hosts
 python run_providers.py --spend --hard     # all very_hard tasks on those two hosts
+docker build -f docker/grader.Dockerfile -t dpe-grader:dev .
+python grade.py --response saved-response.json   # offline regrade, no provider key
 ```
+
+The public grader image has no network, no provider credentials, and
+no host mounts of `warehouse/`. Isolation contains candidate code; it
+does not hide public tests at runtime. Comparable rows also record
+`grader_source_sha` and the immutable image digest in
+`docker/grader-image.json`.

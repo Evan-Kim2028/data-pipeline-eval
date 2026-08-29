@@ -35,6 +35,10 @@ def _grade(**kwargs) -> GradeReport:
         tests_failed=0,
         duration_s=0.1,
         output_sha256="b" * 64,
+        patch_sha256="c" * 64,
+        grader_source_sha="a" * 40,
+        grader_image_digest="sha256:" + ("d" * 64),
+        sandbox_reason=None,
     )
     base.update(kwargs)
     return GradeReport(**base)

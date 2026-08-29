@@ -42,13 +42,21 @@ After apply, `quality.py` tags the tree
 `gold` (byte-match fault files to the gold warehouse, no extra files),
 `equivalent` (only those files changed), or `other`.
 
-Candidate responses must be one bare unified diff (`diff --git` plus
-matching `--- a/` / `+++ b/` headers). Apply is exactly
-`git apply --index --whitespace=error -p1` onto disclosed editable
-paths. Format, policy, and apply failures are distinct. Fences, fuzz,
-`--recount`, and context replacement are not used.
+Candidate responses must contain one unified diff (`diff --git` or
+`--- a/` / `+++ b/`). A markdown fence around that diff is unwrapped,
+then apply is `git apply --index --whitespace=error -p1` onto allowed
+paths. Format, policy, and apply failures are distinct. Empty fences
+and non-diffs still fail format.
 `python verify.py --check-patch TASK RESPONSE` checks a patch without
 running candidate code.
+
+Offline regrade is `python grade.py --response <artifact.json>`. The
+CLI writes a `ResponseArtifact` before any candidate code runs, then
+starts the pinned image from `docker/grader-image.json`. The container
+uses `--network=none`, a read-only root, bounded tmpfs, dropped
+capabilities, and a non-root user. Public tests are visible inside the
+container; Docker does not hide them. Resource limits, not secrecy,
+are the security claim.
 
 `--jobs` runs (task, host) pairs in parallel (default `min(8, n_pairs)`).
 One in-flight request per host. HTTP 429 retries with backoff.

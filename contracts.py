@@ -92,6 +92,14 @@ def _require_hex64(name: str, value: str) -> str:
     return value
 
 
+def _require_image_digest(name: str, value: str) -> str:
+    if not isinstance(value, str) or not value.startswith("sha256:"):
+        raise ContractError(f"{name} must be an immutable sha256 digest")
+    if not _HEX64_RE.fullmatch(value[7:]):
+        raise ContractError(f"{name} must be an immutable sha256 digest")
+    return value
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     id: str
@@ -165,18 +173,25 @@ class GradeReport:
     trial_id: str
     task_id: str
     benchmark_repo_sha: str
+    grader_source_sha: str
+    grader_image_digest: str
     command: tuple[str, ...]
     exit_code: int
     tests_collected: int
     tests_failed: int
     duration_s: float
     output_sha256: str
+    patch_sha256: str
+    sandbox_reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != SCHEMA_VERSION:
             raise ContractError("unknown schema_version")
         _require_sha("benchmark_repo_sha", self.benchmark_repo_sha, allow_dirty=True)
+        _require_sha("grader_source_sha", self.grader_source_sha, allow_dirty=True)
+        _require_image_digest("grader_image_digest", self.grader_image_digest)
         _require_hex64("output_sha256", self.output_sha256)
+        _require_hex64("patch_sha256", self.patch_sha256)
         if self.tests_collected < 0 or self.tests_failed < 0:
             raise ContractError("test counts cannot be negative")
         if self.tests_failed > self.tests_collected:
@@ -216,6 +231,36 @@ class TrialRecord:
             raise ContractError("grade SHA mismatch")
         if self.outcome.kind == "pass" and self.grade is None:
             raise ContractError("pass requires a grade report")
+
+
+@dataclass(frozen=True)
+class ResponseArtifact:
+    schema_version: str
+    trial_id: str
+    task_id: str
+    candidate_text: str
+    candidate_sha256: str
+    prompt_sha256: str
+    model: str
+    requested_provider: str
+    served_provider: str | None
+    generation_id: str | None
+    usage: dict[str, int | float | None]
+    finish_reason: str | None
+    benchmark_repo_sha: str
+    grader_source_sha: str
+    grader_image_digest: str
+    environment_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.schema_version != SCHEMA_VERSION:
+            raise ContractError("unknown schema_version")
+        _require_hex64("candidate_sha256", self.candidate_sha256)
+        _require_hex64("prompt_sha256", self.prompt_sha256)
+        _require_sha("benchmark_repo_sha", self.benchmark_repo_sha, allow_dirty=True)
+        _require_sha("grader_source_sha", self.grader_source_sha, allow_dirty=True)
+        _require_image_digest("grader_image_digest", self.grader_image_digest)
+        _require_hex64("environment_sha256", self.environment_sha256)
 
 
 @dataclass(frozen=True)
@@ -323,12 +368,16 @@ def decode_grade(data: Mapping[str, Any]) -> GradeReport:
         trial_id=str(data["trial_id"]),
         task_id=str(data["task_id"]),
         benchmark_repo_sha=str(data["benchmark_repo_sha"]),
+        grader_source_sha=str(data["grader_source_sha"]),
+        grader_image_digest=str(data["grader_image_digest"]),
         command=tuple(data["command"]),
         exit_code=int(data["exit_code"]),
         tests_collected=int(data["tests_collected"]),
         tests_failed=int(data["tests_failed"]),
         duration_s=float(data["duration_s"]),
         output_sha256=str(data["output_sha256"]),
+        patch_sha256=str(data["patch_sha256"]),
+        sandbox_reason=data["sandbox_reason"],
     )
 
 

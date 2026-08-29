@@ -55,6 +55,10 @@ def test_campaign_fixture_copies_revision_into_every_row(tmp_path: Path):
             tests_failed=1,
             duration_s=0.01,
             output_sha256="b" * 64,
+            patch_sha256="c" * 64,
+            grader_source_sha=published if len(published) >= 40 else sha,
+            grader_image_digest="sha256:" + ("d" * 64),
+            sandbox_reason=None,
         )
         rows.append(
             TrialRecord(
