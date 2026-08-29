@@ -79,7 +79,7 @@ Static checks for each task:
 
 - Collect `tasks/<id>/tests` and `tasks/<id>/tests_adjudication` twice and compare each tier's ordered node ids.
 - Run `python -m compileall -q` on the task's canonical and fault production files.
-- Run `git diff --name-only <phase-5-sha>...HEAD` and require every path to fit the worker's ownership list.
+- Run `git diff --name-only <redesign-head>...HEAD` and require every path to fit the worker's ownership list.
 - Run `git diff --check`.
 
 CLI runtime checks for each task:
@@ -104,5 +104,5 @@ Each worker creates exactly one task commit. Do not combine task ids and do not 
 - Every invariant in the table has a direct public practice or adjudication test, and every named wrong answer has a strictly applicable registered mutant.
 - The audit was green after each integrated task and is byte-for-byte deterministic at the final head.
 - Gold stays green, faults stay red, and all known-wrong mutants produce test failures rather than grader or collection errors.
-- Prompt hashes remain unchanged and official candidate messages still omit tests, explanations, and mutants.
+- The 12 non-redesigned prompt hashes remain unchanged. The three redesigned prompt hashes match their reviewed snapshots. Every official candidate message still omits tests, explanations, and mutants.
 - The final green head and its verification results are pushed to the public repository.

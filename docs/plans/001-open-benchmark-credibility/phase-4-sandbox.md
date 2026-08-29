@@ -36,7 +36,7 @@ Run untrusted candidate code in one public, pinned Docker grader with no network
 
 ## Data structures
 
-- `ResponseArtifact` is `schema version, trial and task ids, exact candidate text and hash, prompt hash, model and provider metadata, usage, finish reason, benchmark_repo_sha`.
+- `ResponseArtifact` is `schema version, trial and task ids, exact candidate text and hash, prompt hash, model and provider metadata, usage, finish reason, benchmark_repo_sha, grader_source_sha, grader image digest, environment digest`.
 - `TaskArchive` is `task id, benchmark_repo_sha, exact faulted checkout, public tests, task policy, content hash`.
 - `GraderImageLock` is `immutable image reference and digest, grader_source_sha, environment digest, Dockerfile hash, supported platform`.
 - `SandboxLimits` is `CPU quota, memory and swap bytes, PID and file limits, tmpfs bytes and inodes, wall seconds, output bytes`.

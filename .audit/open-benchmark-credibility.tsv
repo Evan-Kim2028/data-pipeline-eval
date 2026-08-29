@@ -1,0 +1,2 @@
+ts	phase	decision	why	evidence	result
+2026-08-29T19:50:00Z	phase-0	branched feature/open-benchmark-credibility from e546d9a	public main already has the 15-task corpus, plan, and held tests	commit e546d9a	verify.py red/green for all 15
