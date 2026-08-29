@@ -186,6 +186,30 @@ def test_compare_trials_same_diff(tmp_path):
     assert "yes" in proc.stdout
 
 
+def test_write_findings_markdown_and_html_share_numbers(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "write_findings", ROOT / "scripts" / "write_findings.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    src = ROOT / "tests" / "fixtures" / "campaigns" / "findings-mini.jsonl"
+    md_path, html_path = mod.write_findings(src, tmp_path)
+    md = md_path.read_text()
+    page = html_path.read_text()
+    for blob in (md, page):
+        assert "TESTK3" in blob
+        assert "z-ai" in blob
+        assert "novita" in blob
+        assert "one-shot" in blob
+        assert "reasoning_tokens" in blob or "reason_tok" in blob
+        assert "cached" in blob
+        assert "<script type=\"module\"" not in blob
+    assert "<html" in page
+
+
 def test_grade_env_drops_provider_secrets(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "secret")
     monkeypatch.setenv("PATH", os.environ.get("PATH", "/usr/bin"))
