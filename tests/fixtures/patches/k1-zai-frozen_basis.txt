@@ -1,0 +1,74 @@
+## Diagnosis
+
+`merge_incoming` is byte-for-byte identical to `merge_always_unique`: it concatenates `existing + incoming` and hands the whole thing to `unique_fn`. On a first load, `existing` is empty, so the planner sees "dedupe the full chunk against an empty snapshot" — a full sort/hash dedupe over the entire chunk that can never remove anything (the snapshot had no rows). That's the RSS climb and the hang, and it repeats deterministically on retry. `FirstLoadState.absorb` also ignores its `seen` set entirely, so even incremental chunk absorption does no work.
+
+The fix: when there is no existing basis, there is nothing to merge against — return the incoming rows directly without invoking `unique_fn`. When there *is* an existing basis, dedupe only the incoming chunk and filter it against the existing keys, never re-uniqueing the existing rows. `FirstLoadState` should actually use `seen` to absorb chunks incrementally.
+
+```diff
+--- a/warehouse/incremental/basis.py
++++ b/warehouse/incremental/basis.py
+@@
+ from __future__ import annotations
+ 
+ 
++def _row_key(row: dict) -> tuple:
++    """Stable, hashable key for a row, independent of dict ordering."""
++    items = []
++    for k in sorted(row):
++        v = row[k]
++        try:
++            hash(v)
++        except TypeError:
++            v = repr(v)
++        items.append((k, v))
++    return tuple(items)
++
++
+ class FirstLoadState:
+     def __init__(self) -> None:
+         self.rows: list[dict] = []
+         self.seen: set[str] = set()
+ 
+     def absorb(self, incoming: list[dict]) -> list[dict]:
+-        return list(incoming)
++        fresh: list[dict] = []
++        for row in incoming:
++            key = _row_key(row)
++            if key in self.seen:
++                continue
++            self.seen.add(key)
++            fresh.append(row)
++        self.rows.extend(fresh)
++        return fresh
+ 
+ 
+ def merge_always_unique(existing: list[dict], incoming: list[dict], unique_fn) -> list[dict]:
+     return unique_fn(list(existing) + list(incoming))
+ 
+ 
+ def merge_incoming(existing: list[dict], incoming: list[dict], unique_fn) -> list[dict]:
+-    return unique_fn(list(existing) + list(incoming))
++    if not existing:
++        # First load against an empty snapshot: there is nothing to
++        # dedupe against, so a full unique pass over the chunk is a
++        # no-op that only costs memory and time. Skip it.
++        return list(incoming)
++    if not incoming:
++        return list(existing)
++    # Unique only the incoming chunk, then drop rows already present
++    # in the existing basis. The existing rows are never re-uniqued.
++    deduped_incoming = unique_fn(list(incoming))
++    existing_keys = {_row_key(row) for row in existing}
++    return list(existing) + [
++        row for row in deduped_incoming if _row_key(row) not in existing_keys
++    ]
+```
+
+## Why this resolves the incident
+
+- **First load no longer plans a dedupe.** `merge_first_load` calls `merge_incoming([], incoming, unique_fn)`; with `existing == []` the `unique_fn` call is skipped entirely and the chunk passes straight through, so the worker writes instead of hanging in a full dedupe of a chunk that cannot contain duplicates against an empty snapshot.
+- **Subsequent chunks stay incremental.** Only the incoming chunk is passed to `unique_fn` (bounded by chunk size), and existing rows are matched via a hash set of row keys rather than being re-fed through the dedupe.
+- **`FirstLoadState` now does its job.** `seen` is populated and consulted per row, so repeated chunks are absorbed incrementally instead of being re-processed.
+- **`merge_always_unique` is untouched** — its contract is to always run the full unique, and nothing in the first-load path uses it.
+
+Retry behavior: the same load now returns the chunk directly and writes to gold, so serving will see rows after the retry completes.

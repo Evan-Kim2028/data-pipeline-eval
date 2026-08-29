@@ -1,0 +1,93 @@
+## Diagnosis
+
+`in_event_window` (the event-time path used by the entrypoint) delegates to `WindowState.ingest`, which gates membership on `event["processing_at"] <= closed_processing_at`. That is processing-time closing: once `closed_processing_at` passes, any later-arriving fact is dropped even though its `event_at` lies inside the window. That is exactly the reported failure — the next day's fact had `event_at` inside the window but `processing_at` after the close, so it was discarded and the daily total came up short.
+
+Event-time window membership must be decided by `event_at` alone. `processing_at` may classify a fact as late, but a late fact whose event time falls inside the window still belongs to that window. The processing-time semantics remain available via `in_processing_window`, which is left untouched.
+
+## Fix
+
+```diff
+--- a/warehouse/event_time.py
++++ b/warehouse/event_time.py
+@@
+ class WindowState:
+@@
+     def ingest(self, events: list[dict], closed_processing_at: str) -> list[dict]:
+         for event in events:
+-            if start_bound(event, self.start, self.end) and event["processing_at"] <= closed_processing_at:
++            if not start_bound(event, self.start, self.end):
++                continue
++            # Event-time window: membership is decided solely by event_at.
++            # processing_at only tells us whether the fact arrived on time
++            # or late; a late fact whose event_at falls inside the window
++            # still joins it. Closing on processing_at here was the fault:
++            # it silently dropped late facts and shorted the totals.
++            if event["processing_at"] > closed_processing_at:
++                self.late_facts.append(event)
++            self.facts[event["event_id"]] = event
++        return list(self.facts.values())
+-                self.facts[event["event_id"]] = event
+-        return list(self.facts.values())
+```
+
+Full replacement of `warehouse/event_time.py`:
+
+```python
+from __future__ import annotations
+
+
+class WindowState:
+    def __init__(self, start: str, end: str, lateness: str) -> None:
+        self.start = start
+        self.end = end
+        self.lateness = lateness
+        self.facts: dict[str, dict] = {}
+        self.late_facts: list[dict] = []
+
+    def ingest(self, events: list[dict], closed_processing_at: str) -> list[dict]:
+        for event in events:
+            if not start_bound(event, self.start, self.end):
+                continue
+            # Event-time window: membership is decided solely by event_at.
+            # processing_at only tells us whether the fact arrived on time
+            # or late; a late fact whose event_at falls inside the window
+            # still joins it. Closing on processing_at here was the fault:
+            # it silently dropped late facts and shorted the totals.
+            if event["processing_at"] > closed_processing_at:
+                self.late_facts.append(event)
+            self.facts[event["event_id"]] = event
+        return list(self.facts.values())
+
+
+def start_bound(event: dict, start: str, end: str) -> bool:
+    return start <= event["event_at"] <= end
+
+
+def in_processing_window(
+    events: list[dict],
+    start: str,
+    end: str,
+    closed_processing_at: str,
+) -> list[dict]:
+    return [
+        e
+        for e in events
+        if start <= e["event_at"] <= end and e["processing_at"] <= closed_processing_at
+    ]
+
+
+def in_event_window(
+    events: list[dict],
+    start: str,
+    end: str,
+    closed_processing_at: str,
+) -> list[dict]:
+    return WindowState(start, end, lateness=end).ingest(events, closed_processing_at)
+```
+
+## Why this resolves the incident
+
+- **Late fact rejoins the window.** The next-day fact has `event_at` inside `[start, end]`, so `start_bound` admits it; the `processing_at <= closed_processing_at` gate that dropped it is gone from the event-time path. Daily totals now include it.
+- **Window semantics match ops' expectation.** `facts_in_window` now behaves as an event-time window: close is a bookkeeping event, not a membership filter. Facts arriving after close are tracked in `late_facts` (with the existing `lateness` field now actually exercised) rather than silently discarded.
+- **Processing-time behavior is preserved where it belongs.** `in_processing_window` is unchanged, so any caller that genuinely wants processing-time cutoffs still gets the old (correct-for-that-purpose) semantics.
+- **No signature or file changes.** `WindowState`, `ingest`, and both `in_*` functions keep their signatures; only `warehouse/event_time.py` is touched, and the entrypoint `facts_in_window` needs no edit — it inherits the corrected semantics through `in_event_window`.

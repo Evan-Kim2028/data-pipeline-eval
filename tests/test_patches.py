@@ -88,6 +88,47 @@ def test_python_fence_then_diff_fence_applies_diff():
     assert report.status == "applied"
 
 
+def _bare_at_headers(raw: bytes) -> bytes:
+    lines = []
+    for line in raw.decode().splitlines(True):
+        if line.startswith("@@"):
+            lines.append("@@\n" if line.endswith("\n") else "@@")
+        else:
+            lines.append(line)
+    return "".join(lines).encode()
+
+
+def test_bare_hunk_header_is_not_no_file_hunks():
+    task = spec("timestamptz_cutoff")
+    allowed = tuple(p.value for p in task.editable_checkout_paths)
+    raw = _bare_at_headers(_git_diff("timestamptz_cutoff"))
+    parsed = parse_unified_diff(raw, allowed)
+    assert parsed.paths == allowed
+    work = _seed("timestamptz_cutoff")
+    report = apply_patch(work, task, raw)
+    assert report.status == "applied"
+    assert report.failure is None or report.failure.code != INVALID_PATCH_FORMAT
+
+
+def test_k1_zai_fail_shape_has_hunks():
+    fixtures = ROOT / "tests" / "fixtures" / "patches"
+    samples = {
+        "frozen_basis": fixtures / "k1-zai-frozen_basis.txt",
+        "late_event_close": fixtures / "k1-zai-late_event_close.txt",
+    }
+    for task_id, path in samples.items():
+        content = path.read_bytes()
+        assert b"--- a/" in content
+        assert b"@@" in content
+        task = spec(task_id)
+        work = _seed(task_id)
+        report = apply_patch(work, task, content)
+        assert report.failure is None or report.failure.code != INVALID_PATCH_FORMAT, (
+            task_id,
+            report.failure,
+        )
+
+
 def test_policy_and_apply_failures():
     task = spec("timestamptz_cutoff")
     allowed = tuple(p.value for p in task.editable_checkout_paths)

@@ -39,6 +39,12 @@ _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _DIFF_LANGS = frozenset({"diff", "patch", "udiff"})
 
 
+def _is_hunk_header(line: str) -> bool:
+    if line == "@@" or line.startswith("@@ "):
+        return True
+    return bool(_HUNK.match(line))
+
+
 @dataclass(frozen=True)
 class PatchFailure(Exception):
     cls: str
@@ -188,9 +194,12 @@ def rewrite_hunks(text: str, work: Path) -> bytes:
         header_a = _HEADER_A.match(line)
         if header_a:
             path = header_a.group(1)
-        if line.startswith("@@ "):
+        if _is_hunk_header(line):
             end = i + 1
-            while end < len(lines) and not lines[end].startswith(("@@ ", "diff --git ", "--- ")):
+            while end < len(lines) and not (
+                _is_hunk_header(lines[end])
+                or lines[end].startswith(("diff --git ", "--- "))
+            ):
                 end += 1
             hunk = lines[i + 1 : end]
             old_n, new_n = _hunk_counts(hunk)
@@ -258,9 +267,7 @@ def parse_unified_diff(raw: bytes, allowed: tuple[str, ...]) -> ValidatedPatch:
                 paths.append(path)
             i += 2
             continue
-        if line.startswith("@@ "):
-            if not line.endswith(" @@") and " @@" not in line[3:]:
-                raise _fail(FORMAT, INVALID_PATCH_FORMAT, "incomplete hunk header")
+        if _is_hunk_header(line):
             hunks += 1
         i += 1
     if not paths or hunks == 0:
