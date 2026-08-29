@@ -144,3 +144,12 @@ def default_ids() -> tuple[str, ...]:
 
 def all_ids() -> tuple[str, ...]:
     return tuple(t["id"] for t in TASKS)
+
+
+GOLDEN_IDS = (
+    "timestamptz_cutoff",
+    "schema_infer",
+    "unique_probe",
+    "latest_pointer",
+    "watermark_poison",
+)

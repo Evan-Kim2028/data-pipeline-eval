@@ -28,12 +28,14 @@ Fixtures are synthetic jsonl (`entity_id` / `event_at` / `amount` /
 
 Incidents sit in a shared `warehouse/` tree (ingest/silver/gold/catalog/
 history/ops/sources). Each task applies a one-file `fault/` overlay.
-Hidden tests grade the failure mode. Gold is the un-faulted tree plus
+Shown tests grade the failure mode; `tests_held/` is not sent to the
+model. Gold is the un-faulted tree plus
 `docs/solutions/`. Python in `warehouse/` and `tasks/` has no inline
 comments; docs stay in `docs/`.
 
 ```sh
 python scripts/setup_eval.py --seed 42    # synthetic jsonl + partitions
 python verify.py                          # starters red, gold green
-python run_providers.py                   # refuses OpenRouter until --spend
+python run_providers.py --spend --smoke    # timestamptz_cutoff on z-ai + novita
+python run_providers.py --spend --golden   # 5-task ladder on those two hosts
 ```

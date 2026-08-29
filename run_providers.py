@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Optional OpenRouter bake-off. Refuses to spend unless you pass --spend.
 
-    python run_providers.py              # prints this help, exit 2
-    python run_providers.py --spend      # you opted in
+    python run_providers.py                     # prints this help, exit 2
+    python run_providers.py --spend --smoke     # timestamptz_cutoff on z-ai, novita
+    python run_providers.py --spend --golden    # 5-task ladder on z-ai, novita
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -23,7 +25,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from catalog import all_ids, default_ids
+from catalog import GOLDEN_IDS, all_ids, default_ids
+from quality import classify
 
 ROOT = Path(__file__).resolve().parent
 
@@ -66,7 +69,11 @@ LOGS = ROOT / "logs"
 PRINT_LOCK = threading.Lock()
 LOG_LOCK = threading.Lock()
 SPEND_LOCK = threading.Lock()
+SEM_LOCK = threading.Lock()
+PROVIDER_SEMS: dict[str, threading.Semaphore] = {}
 DEFAULT_JOBS = 8
+PER_PROVIDER = 1
+RETRY_429 = 4
 
 
 def _message_text(msg: dict) -> str:
@@ -99,6 +106,80 @@ def _extract_python_or_diff(text: str) -> str:
     return text
 
 
+def _reset_work(work: Path) -> None:
+    subprocess.run(["git", "checkout", "-q", "--", "."], cwd=work, check=True)
+    subprocess.run(["git", "clean", "-qfd"], cwd=work, check=True)
+
+
+def _changed_paths(work: Path) -> list[Path]:
+    proc = subprocess.run(
+        ["git", "diff", "--name-only"],
+        cwd=work,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [work / line for line in proc.stdout.splitlines() if line]
+
+
+def _parse_changed_py(work: Path) -> str | None:
+    changed = _changed_paths(work)
+    if not changed:
+        return "apply changed no files"
+    for path in changed:
+        if path.suffix != ".py":
+            continue
+        try:
+            ast.parse(path.read_text())
+        except SyntaxError as exc:
+            return f"{path.relative_to(work).as_posix()}:{exc.lineno} {exc.msg}"
+    return None
+
+
+def _find_line(old: list[str], oi: int, needle: str, window: int = 80) -> int | None:
+    for k in range(oi, min(len(old), oi + window)):
+        if old[k] == needle:
+            return k
+    return None
+
+
+def _apply_hunk_lines(old: list[str], hunk_lines: list[str]) -> list[str]:
+    new: list[str] = []
+    oi = 0
+    for line in hunk_lines:
+        if line.startswith(("@@", "diff ", "index ")):
+            continue
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            new.append(line[1:])
+            continue
+        if line.startswith("-"):
+            needle = line[1:]
+            if oi < len(old) and old[oi] == needle:
+                oi += 1
+                continue
+            found = _find_line(old, oi, needle)
+            if found is None:
+                raise RuntimeError(f"minus not found: {needle[:80]}")
+            new.extend(old[oi:found])
+            oi = found + 1
+            continue
+        ctx = line[1:] if line.startswith(" ") else line
+        if oi < len(old) and old[oi] == ctx:
+            new.append(old[oi])
+            oi += 1
+            continue
+        found = _find_line(old, oi, ctx)
+        if found is None:
+            raise RuntimeError(f"context not found: {ctx[:80]}")
+        new.extend(old[oi:found])
+        new.append(old[found])
+        oi = found + 1
+    new.extend(old[oi:])
+    return new
+
+
 def _apply_context_hunks(work: Path, blob: str) -> None:
     applied = 0
     parts = re.split(r"(?m)^--- ", blob)
@@ -120,68 +201,64 @@ def _apply_context_hunks(work: Path, blob: str) -> None:
             else:
                 continue
         old = target.read_text().splitlines()
-        new: list[str] = []
-        oi = 0
-        for line in rest.splitlines():
-            if line.startswith("@@") or line.startswith("diff "):
-                continue
-            if line.startswith("+") and not line.startswith("+++"):
-                new.append(line[1:])
-            elif line.startswith("-") and not line.startswith("---"):
-                if oi < len(old) and old[oi] == line[1:]:
-                    oi += 1
-                else:
-                    found = None
-                    for k in range(oi, min(oi + 8, len(old))):
-                        if old[k] == line[1:]:
-                            found = k
-                            break
-                    if found is None:
-                        continue
-                    new.extend(old[oi:found])
-                    oi = found + 1
-            elif line.startswith(" "):
-                ctx = line[1:]
-                if oi < len(old) and old[oi] == ctx:
-                    new.append(old[oi])
-                    oi += 1
-                else:
-                    new.append(ctx)
-            elif line.strip() == "":
-                continue
-        new.extend(old[oi:])
+        new = _apply_hunk_lines(old, rest.splitlines())
         if new != old:
-            target.write_text("\n".join(new) + ("\n" if old else "\n"))
+            target.write_text("\n".join(new) + "\n")
             applied += 1
     if applied == 0:
         raise RuntimeError("context patch changed no files")
+
+
+def _git_apply(work: Path, blob: str, extra: list[str]) -> bool:
+    proc = subprocess.run(
+        ["git", "apply", "--whitespace=nowarn", "--recount", *extra],
+        cwd=work,
+        input=blob.encode(),
+        capture_output=True,
+    )
+    return proc.returncode == 0
+
+
+def _patch_apply(work: Path, blob: str, extra: list[str]) -> bool:
+    proc = subprocess.run(
+        ["patch", "--forward", "--fuzz=0", *extra],
+        cwd=work,
+        input=blob.encode(),
+        capture_output=True,
+    )
+    return proc.returncode == 0
 
 
 def _apply_model_output(work: Path, raw: str) -> None:
     blob = _extract_python_or_diff(raw)
     stripped = blob.lstrip()
     if not stripped.startswith(("diff ", "--- ", "+++ ")):
-        raise RuntimeError("model output was not a unified diff")
-    last_err = b""
-    for extra in (["-p0"], ["-p1"], ["-p2"]):
-        proc = subprocess.run(
-            ["git", "apply", "--whitespace=nowarn", "--recount", *extra],
-            cwd=work,
-            input=blob.encode(),
-            capture_output=True,
-        )
-        if proc.returncode == 0:
+        raise RuntimeError("apply_fail: model output was not a unified diff")
+    last = "apply_fail"
+    strategies: list[tuple[str, object]] = [
+        ("git -p0", lambda: _git_apply(work, blob, ["-p0"])),
+        ("git -p1", lambda: _git_apply(work, blob, ["-p1"])),
+        ("git -p2", lambda: _git_apply(work, blob, ["-p2"])),
+        ("patch -p0", lambda: _patch_apply(work, blob, ["-p0"])),
+        ("patch -p1", lambda: _patch_apply(work, blob, ["-p1"])),
+        ("context", lambda: (_apply_context_hunks(work, blob) or True)),
+    ]
+    for name, fn in strategies:
+        _reset_work(work)
+        try:
+            ok = fn()
+        except Exception as exc:
+            last = f"apply_fail:{name}: {exc}"
+            continue
+        if not ok:
+            last = f"apply_fail:{name}"
+            continue
+        err = _parse_changed_py(work)
+        if err is None:
             return
-        last_err = proc.stderr
-    proc = subprocess.run(
-        ["patch", "-p1", "--forward", "--fuzz=3"],
-        cwd=work,
-        input=blob.encode(),
-        capture_output=True,
-    )
-    if proc.returncode == 0:
-        return
-    _apply_context_hunks(work, blob)
+        last = f"apply_fail:{name}: {err}"
+    _reset_work(work)
+    raise RuntimeError(last)
 
 
 def _file_tree(root: Path) -> str:
@@ -268,10 +345,24 @@ def _complete(prompt: str, bundle: str, provider: str, *, task: str) -> tuple[st
     finish_reason = None
     host = provider
     _tick(task, provider, t0, phase, 0, 0, "requesting")
-    try:
-        resp = urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S)
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"HTTP {exc.code} provider={provider}: {exc.read().decode()[:400]}") from exc
+    resp = None
+    last_http = b""
+    for attempt in range(RETRY_429):
+        try:
+            resp = urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S)
+            break
+        except urllib.error.HTTPError as exc:
+            last_http = exc.read()
+            if exc.code == 429 and attempt + 1 < RETRY_429:
+                wait = 5 * (2 ** attempt)
+                _tick(task, provider, t0, "wait", 0, 0, f"429 retry {attempt + 1}/{RETRY_429 - 1} in {wait}s")
+                time.sleep(wait)
+                continue
+            raise RuntimeError(
+                f"HTTP {exc.code} provider={provider}: {last_http.decode()[:400]}"
+            ) from exc
+    if resp is None:
+        raise RuntimeError(f"HTTP 429 provider={provider}: {last_http.decode()[:400]}")
     try:
         while True:
             raw_line = resp.readline()
@@ -457,33 +548,88 @@ def _run_pair(task: str, provider: str, spend: list[float], run_meta: dict, all_
             rel = live.relative_to(tmp).as_posix()
             bundle += f"\n## {rel}\n```python\n{live.read_text()}```\n"
         tests = ROOT / "tasks" / task / "tests"
+        held = ROOT / "tasks" / task / "tests_held"
         prompt = (ROOT / "tasks" / task / "prompt.txt").read_text()
         bundle += "\nHidden tests (do not edit):\n"
         for p in sorted(tests.glob("test_*.py")):
             bundle += f"\n## tests/{p.name}\n```python\n{p.read_text()}```\n"
-        raw, meta = _complete(prompt, bundle, provider, task=task)
+        with SEM_LOCK:
+            sem = PROVIDER_SEMS.setdefault(provider, threading.Semaphore(PER_PROVIDER))
+        with sem:
+            raw, meta = _complete(prompt, bundle, provider, task=task)
+        host_name = meta.get("provider")
         row.update(meta)
+        row["provider"] = provider
+        if host_name:
+            row["provider_name"] = host_name
         if meta.get("cost"):
             with SPEND_LOCK:
                 spend[0] += float(meta["cost"])
         _out(f"  {task}/{provider}  applying patch ({meta.get('content_chars', 0)}c)")
         _apply_model_output(tmp, raw)
-        _out(f"  {task}/{provider}  pytest")
-        ok, pytest_out = _pytest(tmp, tests)
+        row.update(classify(task, tmp))
+        _out(f"  {task}/{provider}  pytest shown")
+        shown_ok, shown_out = _pytest(tmp, tests)
+        held_ok, held_out = True, ""
+        if held.is_dir() and any(held.glob("test_*.py")):
+            _out(f"  {task}/{provider}  pytest held-out")
+            held_ok, held_out = _pytest(tmp, held)
+        row["pass_shown"] = shown_ok
+        row["pass_held"] = held_ok
+        ok = shown_ok and held_ok
         row["pass"] = ok
-        row["pytest"] = pytest_out.splitlines()[-8:]
+        if not shown_ok:
+            row["quality"] = "broken"
+        row["pytest"] = (shown_out + "\n" + held_out).splitlines()[-12:]
+        if not ok:
+            blob = held_out if shown_ok and not held_ok else shown_out
+            lines = [ln for ln in blob.strip().splitlines() if ln.strip()]
+            fail_line = next(
+                (ln for ln in reversed(lines) if "Error" in ln or "assert" in ln or ln.startswith("FAILED")),
+                lines[-1] if lines else "pytest failed",
+            )
+            if shown_ok and not held_ok:
+                fail_line = "held-out: " + fail_line
+            row["error"] = fail_line[:400]
+            _out(f"  {task}/{provider}  pytest fail")
+            for ln in lines[-6:]:
+                _out(f"    {ln}")
     except Exception as exc:
         row["error"] = str(exc)[:400]
+        if str(exc).startswith("apply_fail"):
+            row["quality"] = "apply_fail"
         _out(f"  {task}/{provider}  error: {row['error']}")
     finally:
         if tmp is not None:
             shutil.rmtree(tmp.parent, ignore_errors=True)
     _record(run_meta, all_rows, spend, row)
+    q = row.get("quality") or ""
     _out(
         f"{'PASS' if row.get('pass') else 'FAIL':4} {task:22} {provider:14} "
-        f"{row.get('latency_s', '')}s  ${row.get('cost') or 0}  {row.get('error') or ''}"
+        f"{q:11} {row.get('latency_s', '')}s  ${row.get('cost') or 0}  {row.get('error') or ''}"
     )
     return row
+
+
+def _summary(rows: list[dict], providers: list[str], tasks: tuple[str, ...]) -> None:
+    grid = {(r["task"], str(r.get("provider") or "").lower()): r for r in rows}
+    header = "task".ljust(22) + "".join(f"{p:16}" for p in providers)
+    _out("\n" + header)
+    for task in tasks:
+        line = task.ljust(22)
+        for p in providers:
+            r = grid.get((task, p.lower()))
+            if r is None:
+                cell = "?"
+            elif r.get("pass"):
+                cell = f"PASS/{r.get('quality') or '?'}"
+            else:
+                cell = "FAIL"
+            line += f"{cell:16}"
+        _out(line)
+    for p in providers:
+        subset = [r for r in rows if str(r.get("provider") or "").lower() == p.lower()]
+        _out(f"{p}: {sum(1 for r in subset if r.get('pass'))}/{len(subset)}")
 
 
 def main() -> int:
@@ -494,6 +640,16 @@ def main() -> int:
         help="Call OpenRouter. Off by default; I will not spend without this flag.",
     )
     ap.add_argument("--task", choices=ALL_TASKS, action="append")
+    ap.add_argument(
+        "--smoke",
+        action="store_true",
+        help="E2E: timestamptz_cutoff on z-ai and novita.",
+    )
+    ap.add_argument(
+        "--golden",
+        action="store_true",
+        help="Five-task ladder on z-ai and novita.",
+    )
     ap.add_argument("--providers", default=",".join(DEFAULT_PROVIDERS))
     ap.add_argument(
         "--jobs",
@@ -509,8 +665,19 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    tasks = tuple(args.task) if args.task else TASKS
-    providers = [p.strip() for p in args.providers.split(",") if p.strip()]
+    cheap = args.smoke or args.golden
+    if args.task:
+        tasks = tuple(args.task)
+    elif args.golden:
+        tasks = GOLDEN_IDS
+    elif args.smoke:
+        tasks = ("timestamptz_cutoff",)
+    else:
+        tasks = TASKS
+    if cheap and args.providers == ",".join(DEFAULT_PROVIDERS):
+        providers = ["z-ai", "novita"]
+    else:
+        providers = [p.strip() for p in args.providers.split(",") if p.strip()]
     pairs = [(t, p) for t in tasks for p in providers]
     jobs = args.jobs if args.jobs > 0 else min(DEFAULT_JOBS, max(1, len(pairs)))
     spend = [0.0]
@@ -538,11 +705,12 @@ def main() -> int:
             fut.result()
     n_pass = sum(1 for r in rows if r.get("pass"))
     run_path = LOGS / "runs" / f"{run_id}.jsonl"
+    _summary(rows, providers, tasks)
     _out(
         f"\n{n_pass}/{len(rows)} passed  spend~${spend[0]:.4f}  "
         f"run={run_id}  appended {ROOT / 'results.jsonl'}  wrote {run_path}"
     )
-    return 0
+    return 0 if n_pass == len(rows) else 1
 
 
 if __name__ == "__main__":
