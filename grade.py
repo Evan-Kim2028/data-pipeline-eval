@@ -20,7 +20,6 @@ from contracts import (
     GradeReport,
     encode_json,
     environment_digest,
-    git_revision,
 )
 from sandbox import image_lock, run_container
 
@@ -103,6 +102,18 @@ def _inner_report(stdout: str) -> dict:
     return json.loads(lines[-1])
 
 
+def verify_pins(artifact: dict, lock: dict, *, environment_sha256: str) -> None:
+    locked = lock.get("grader_source_sha")
+    if not locked:
+        raise SystemExit("grader image lock missing grader_source_sha")
+    if artifact["grader_source_sha"] != locked:
+        raise SystemExit("grader_source_sha mismatch")
+    if artifact["grader_image_digest"] != lock["digest"]:
+        raise SystemExit("grader image digest mismatch")
+    if artifact["environment_sha256"] != environment_sha256:
+        raise SystemExit("environment_sha256 mismatch")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--response", required=True, type=Path)
@@ -110,14 +121,7 @@ def main() -> int:
     _scrub_env()
     artifact = load_artifact(args.response)
     lock = image_lock()
-    if artifact["grader_image_digest"] != lock["digest"]:
-        raise SystemExit("grader image digest mismatch")
-    sha, dirty = git_revision(ROOT)
-    published = sha if not dirty else f"{sha}-dirty"
-    if artifact["grader_source_sha"] not in {sha, published} and not dirty:
-        raise SystemExit("grader_source_sha mismatch")
-    if artifact["environment_sha256"] != environment_digest(ROOT):
-        raise SystemExit("environment_sha256 mismatch")
+    verify_pins(artifact, lock, environment_sha256=environment_digest(ROOT))
     task_id = artifact["task_id"]
     checkout = materialize(spec(task_id), ROOT)
     tmp = Path(tempfile.mkdtemp())

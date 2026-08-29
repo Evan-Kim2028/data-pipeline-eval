@@ -9,10 +9,14 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from catalog import spec
 from checkouts import materialize, write_checkout
-from grade import _tar_bytes
+from contracts import environment_digest
+from grade import _tar_bytes, verify_pins
 from patches import gold_unified_diff
+from sandbox import image_lock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,3 +54,21 @@ def test_gold_diff_is_a_strict_unified_patch():
     raw = gold_unified_diff(ROOT, spec("timestamptz_cutoff"))
     assert raw.startswith(b"diff --git a/warehouse/sidecar/cutoff.py")
     assert b"```" not in raw
+
+
+def test_grade_pins_follow_image_lock_not_head():
+    lock = image_lock()
+    env = environment_digest(ROOT)
+    artifact = {
+        "grader_source_sha": lock["grader_source_sha"],
+        "grader_image_digest": lock["digest"],
+        "environment_sha256": env,
+    }
+    verify_pins(artifact, lock, environment_sha256=env)
+    with pytest.raises(SystemExit, match="grader_source_sha mismatch"):
+        verify_pins(
+            {**artifact, "grader_source_sha": "b" * 40},
+            lock,
+            environment_sha256=env,
+        )
+
