@@ -1,12 +1,11 @@
 # data-pipeline-eval
 
-I run a lakehouse. Models I tried kept missing the same pipeline
-repairs, so I turned those failures into a public eval.
-
-Each task is a broken scheduled job. It reads files and writes
-tables. The model reads the incident and answers with a unified
-diff. Tests decide whether the repair works. The warehouse is
-generic. I have hit these bugs at work.
+This eval collects pipeline repairs that models miss in a working
+lakehouse. Each task is a broken scheduled job. It reads files
+and writes tables. The model reads the incident and answers with
+a unified diff. Tests decide whether the repair works. The
+warehouse is generic. The bugs match failures from production
+lakehouse work.
 
 ## The fifteen tasks
 
@@ -77,8 +76,8 @@ python verify.py
 `verify.py` fails each task on the broken files in `tasks/<id>/fault`
 and passes it after the gold patch.
 
-An OpenRouter key is required to call a host. Pass `--spend` when
-you want provider calls.
+An OpenRouter key is required to call a host. Pass `--spend` to
+make provider calls.
 
 ```sh
 export OPENROUTER_API_KEY=sk-or-...   # or a one-line .env
