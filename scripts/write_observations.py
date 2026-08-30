@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from logic_trace import host_hop_rollup
+from catalog import by_id
+from logic_trace import host_hop_rollup, task_hop_rollup
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -74,7 +75,70 @@ def _gmi_read(hosts: list[dict]) -> str:
     return " ".join(lines)
 
 
-def markdown(run_id: str, hosts: list[dict]) -> str:
+def _task_read(tasks: list[dict], one_liners: dict[str, str]) -> str:
+    solved = [t for t in tasks if t.get("band") == "solved"]
+    mixed = [t for t in tasks if t.get("band") == "mixed"]
+    trip = [t for t in tasks if t.get("band") == "trip"]
+    bits = [
+        f"Catalog marks every variance task `very_hard`. Empirical pass rate on this run splits them. "
+        f"Solved ({len(solved)}): "
+        + (", ".join(f"`{t['task']}` {_fmt(t.get('rate'), 2)}" for t in solved) or "none")
+        + f". Mixed ({len(mixed)}): "
+        + (", ".join(f"`{t['task']}` {_fmt(t.get('rate'), 2)}" for t in mixed) or "none")
+        + f". Trip ({len(trip)}): "
+        + (", ".join(f"`{t['task']}` {_fmt(t.get('rate'), 2)}" for t in trip) or "none")
+        + ".",
+    ]
+    if solved:
+        hops = _fmt(_mean([t.get("mean_hops") for t in solved]), 1)
+        think = _fmt(_mean([t.get("mean_think_s") for t in solved]), 1)
+        bits.append(
+            f"Where they do well, CoT stays short (mean hops {hops}, think {think}s). "
+            "They name the bug and emit a small diff."
+        )
+    if trip:
+        apply_n = sum(int(t.get("apply_fail") or 0) for t in trip)
+        explode = [t for t in trip if (t.get("mean_hops") or 0) >= 10]
+        apply_trip = [t for t in trip if int(t.get("apply_fail") or 0) >= (t.get("n") or 1) / 2]
+        if explode:
+            names = ", ".join(f"`{t['task']}` hops {_fmt(t.get('mean_hops'), 1)} think {_fmt(t.get('mean_think_s'), 1)}s" for t in explode)
+            bits.append(
+                f"Where they trip by overthinking: {names}. "
+                "The CoT restates the same diagnosis instead of locking a patch that matches held-out tests."
+            )
+            worst = max(explode, key=lambda t: t.get("mean_think_s") or 0)
+            bits.append(
+                f"The longest think pile-up is `{worst['task']}` "
+                f"({_fmt(worst.get('mean_think_s'), 1)}s, hops {_fmt(worst.get('mean_hops'), 1)})."
+            )
+        if apply_trip:
+            names = ", ".join(f"`{t['task']}`" for t in apply_trip)
+            bits.append(
+                f"Where they trip with a short CoT: {names} is mostly `patch_did_not_apply`. "
+                "They describe the right mechanism, then the unified diff does not apply."
+            )
+        if apply_n and not apply_trip and not explode:
+            bits.append(f"{apply_n} apply-format fails sit on trip tasks.")
+    apply_mixed = [
+        t for t in mixed if int(t.get("apply_fail") or 0) >= (t.get("n") or 1) / 2
+    ]
+    if apply_mixed:
+        names = ", ".join(
+            f"`{t['task']}` {t.get('apply_fail')}/{t.get('n')} apply-fail, hops {_fmt(t.get('mean_hops'), 1)}"
+            for t in apply_mixed
+        )
+        bits.append(
+            f"Mixed but mostly apply-fail: {names}. Diagnosis is short. The patch does not land."
+        )
+    return " ".join(bits)
+
+
+def _mean(vals: list) -> float | None:
+    nums = [float(v) for v in vals if isinstance(v, (int, float))]
+    return sum(nums) / len(nums) if nums else None
+
+
+def markdown(run_id: str, hosts: list[dict], tasks: list[dict], one_liners: dict[str, str]) -> str:
     lines = [
         "# Observations: GMI Cloud think time vs hop traces",
         "",
@@ -98,6 +162,23 @@ def markdown(run_id: str, hosts: list[dict]) -> str:
         )
     lines += [
         "",
+        "## Task complexity",
+        "",
+        _task_read(tasks, one_liners),
+        "",
+        "| task | catalog | empirical | band | pass | mean hops | hops on pass | hops on fail | mean think_s | think on fail | apply fail | mechanism |",
+        "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for t in tasks:
+        lines.append(
+            f"| `{t['task']}` | {t.get('estimated_difficulty') or ''} | {_fmt(t.get('rate'), 2)} | "
+            f"{t.get('band')} | {t['n_pass']}/{t['n']} | {_fmt(t.get('mean_hops'), 1)} | "
+            f"{_fmt(t.get('mean_hops_pass'), 1)} | {_fmt(t.get('mean_hops_fail'), 1)} | "
+            f"{_fmt(t.get('mean_think_s'), 1)} | {_fmt(t.get('mean_think_s_fail'), 1)} | "
+            f"{t.get('apply_fail')} | {one_liners.get(t['task'], '')} |"
+        )
+    lines += [
+        "",
         "## How to read this",
         "",
         "More hops means the CoT broke into more claim/paragraph units. Longer hops means each unit is bigger. "
@@ -113,7 +194,7 @@ def markdown(run_id: str, hosts: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def html_doc(run_id: str, hosts: list[dict]) -> str:
+def html_doc(run_id: str, hosts: list[dict], tasks: list[dict], one_liners: dict[str, str]) -> str:
     rows = []
     for h in hosts:
         rows.append(
@@ -146,6 +227,31 @@ not tool-call spans and not an agent loop. No winner rank.</p>
 <tr><th>provider</th><th>n</th><th>pass</th><th>mean hops</th><th>mean chars/hop</th><th>mean chars</th><th>mean reason_tok</th><th>mean tokens/hop</th><th>mean think_s</th><th>reason tok / think_s</th><th>mean latency_s</th></tr>
 {''.join(rows)}
 </table>
+<h2>Task complexity</h2>
+<p>{html.escape(_task_read(tasks, one_liners))}</p>
+<table>
+<tr><th>task</th><th>catalog</th><th>empirical</th><th>band</th><th>pass</th><th>mean hops</th><th>hops on pass</th><th>hops on fail</th><th>mean think_s</th><th>think on fail</th><th>apply fail</th><th>mechanism</th></tr>
+{''.join(
+    "<tr>" + "".join(
+        f"<td>{html.escape(str(x))}</td>"
+        for x in [
+            t["task"],
+            t.get("estimated_difficulty") or "",
+            _fmt(t.get("rate"), 2),
+            t.get("band"),
+            f"{t['n_pass']}/{t['n']}",
+            _fmt(t.get("mean_hops"), 1),
+            _fmt(t.get("mean_hops_pass"), 1),
+            _fmt(t.get("mean_hops_fail"), 1),
+            _fmt(t.get("mean_think_s"), 1),
+            _fmt(t.get("mean_think_s_fail"), 1),
+            t.get("apply_fail"),
+            one_liners.get(t["task"], ""),
+        ]
+    ) + "</tr>"
+    for t in tasks
+)}
+</table>
 <h2>How to read this</h2>
 <p>More hops means the CoT broke into more claim/paragraph units. Longer hops means each unit is bigger.
 Tokens per hop is reasoning_tokens / hop_count. Think_s is stream time spent in the reasoning phase.</p>
@@ -167,12 +273,16 @@ GMI still has the highest latency here, but mean think_s sits next to deepinfra.
 def write_observations(jsonl: Path, out_dir: Path) -> tuple[Path, Path, list[dict]]:
     rows = load_rows(jsonl)
     hosts = host_hop_rollup(rows)
+    specs = by_id()
+    difficulty_of = {i: t.estimated_difficulty for i, t in specs.items()}
+    one_liners = {i: t.one_liner for i, t in specs.items()}
+    tasks = task_hop_rollup(rows, difficulty_of=difficulty_of)
     run_id = str(rows[0].get("run_id") or jsonl.stem) if rows else jsonl.stem
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / "OBSERVATIONS.md"
     html_path = out_dir / "OBSERVATIONS.html"
-    md_path.write_text(markdown(run_id, hosts))
-    html_path.write_text(html_doc(run_id, hosts))
+    md_path.write_text(markdown(run_id, hosts, tasks, one_liners))
+    html_path.write_text(html_doc(run_id, hosts, tasks, one_liners))
     return md_path, html_path, hosts
 
 

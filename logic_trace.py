@@ -177,3 +177,73 @@ def host_hop_rollup(rows: list[dict]) -> list[dict]:
             }
         )
     return out
+
+
+def task_hop_rollup(rows: list[dict], *, difficulty_of: dict[str, str] | None = None) -> list[dict]:
+    difficulty_of = difficulty_of or {}
+    order: list[str] = []
+    by: dict[str, list[tuple[dict, dict]]] = {}
+    for row in rows:
+        task = str(row.get("task") or "")
+        if not task:
+            continue
+        if task not in by:
+            by[task] = []
+            order.append(task)
+        by[task].append((row, trial_hop_stats(row)))
+    out: list[dict] = []
+    for task in order:
+        pairs = by[task]
+        trials = [s for _, s in pairs]
+        n = len(trials)
+        n_pass = sum(1 for t in trials if t.get("pass"))
+        qualities: dict[str, int] = {}
+        for t in trials:
+            q = str(t.get("quality") or "")
+            qualities[q] = qualities.get(q, 0) + 1
+        pass_h = [float(t["hop_count"]) for t in trials if t.get("pass")]
+        fail_h = [float(t["hop_count"]) for t in trials if not t.get("pass")]
+        pass_th = [float(t["think_s"]) for t in trials if t.get("pass") and isinstance(t.get("think_s"), (int, float))]
+        fail_th = [float(t["think_s"]) for t in trials if not t.get("pass") and isinstance(t.get("think_s"), (int, float))]
+        rate = n_pass / n if n else 0.0
+        if rate >= 0.9:
+            band = "solved"
+        elif rate == 0:
+            band = "trip"
+        else:
+            band = "mixed"
+        apply_fail = sum(
+            1
+            for t in trials
+            if str(t.get("quality") or "").startswith("patch_did_not")
+            or str(t.get("quality") or "").startswith("invalid_patch")
+        )
+        host_pass: dict[str, list[int]] = {}
+        for row, stats in pairs:
+            p = str(row.get("provider") or "")
+            host_pass.setdefault(p, [0, 0])
+            host_pass[p][1] += 1
+            if stats.get("pass"):
+                host_pass[p][0] += 1
+        out.append(
+            {
+                "task": task,
+                "estimated_difficulty": difficulty_of.get(task, ""),
+                "n": n,
+                "n_pass": n_pass,
+                "rate": rate,
+                "band": band,
+                "qualities": qualities,
+                "apply_fail": apply_fail,
+                "mean_hops": _mean([float(t["hop_count"]) for t in trials]),
+                "mean_hops_pass": _mean(pass_h),
+                "mean_hops_fail": _mean(fail_h),
+                "mean_think_s": _mean(
+                    [float(t["think_s"]) for t in trials if isinstance(t.get("think_s"), (int, float))]
+                ),
+                "mean_think_s_pass": _mean(pass_th),
+                "mean_think_s_fail": _mean(fail_th),
+                "host_pass": {h: f"{v[0]}/{v[1]}" for h, v in host_pass.items()},
+            }
+        )
+    return out

@@ -13,6 +13,22 @@ GMI Cloud mean think_s is 17.1s (rank 2 of 4). Mean hops 12.0 (rank 2). Mean cha
 | novita | 27 | 13/27 | 7.6 | 243 | 2081 | 500 | 55 | 12.8 | 42.7 | 30.5 |
 | z-ai | 27 | 15/27 | 11.6 | 212 | 2955 | 656 | 48 | 14.8 | 42.5 | 28.4 |
 
+## Task complexity
+
+Catalog marks every variance task `very_hard`. Empirical pass rate on this run splits them. Solved (4): `watermark_poison` 0.92, `entity_reload` 1.00, `read_write_split` 0.92, `drop_resurrect` 1.00. Mixed (2): `mtime_skip` 0.75, `field_readd` 0.17. Trip (3): `frozen_basis` 0.00, `rebuild_wipe` 0.00, `late_event_close` 0.00. Where they do well, CoT stays short (mean hops 3.3, think 3.1s). They name the bug and emit a small diff. Where they trip by overthinking: `frozen_basis` hops 23.3 think 29.3s, `rebuild_wipe` hops 10.8 think 15.6s, `late_event_close` hops 44.5 think 64.9s. The CoT restates the same diagnosis instead of locking a patch that matches held-out tests. The longest think pile-up is `late_event_close` (64.9s, hops 44.5). Mixed but mostly apply-fail: `field_readd` 10/12 apply-fail, hops 3.0. Diagnosis is short. The patch does not land.
+
+| task | catalog | empirical | band | pass | mean hops | hops on pass | hops on fail | mean think_s | think on fail | apply fail | mechanism |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `watermark_poison` | very_hard | 0.92 | solved | 11/12 | 4.1 | 4.5 | 0.0 | 3.9 |  | 0 | Watermark advances before the window commits. |
+| `entity_reload` | very_hard | 1.00 | solved | 12/12 | 4.2 | 4.2 |  | 3.7 |  | 0 | Watermark picks changed keys; scan has no time predicate. |
+| `frozen_basis` | very_hard | 0.00 | trip | 0/12 | 23.3 |  | 23.3 | 29.3 | 29.3 | 0 | Chunk unique()s against a start-of-run snapshot with no existing rows. |
+| `read_write_split` | very_hard | 0.92 | solved | 11/12 | 1.4 | 1.5 | 0.0 | 1.6 |  | 0 | Partitioned overwrite; the read still walks the full bronze tree. |
+| `mtime_skip` | very_hard | 0.75 | mixed | 9/12 | 7.0 | 7.3 | 6.0 | 12.8 | 8.7 | 0 | Crash mid-chunk; output mtime treats unread older files as consumed. |
+| `rebuild_wipe` | very_hard | 0.00 | trip | 0/12 | 10.8 |  | 10.8 | 15.6 | 15.6 | 0 | Rebuild retry wipes staging checkpoints and restarts at record one. |
+| `drop_resurrect` | very_hard | 1.00 | solved | 12/12 | 3.4 | 3.4 |  | 3.0 |  | 0 | Catalog drop; next writer get_or_create recreates the table. |
+| `field_readd` | very_hard | 0.17 | mixed | 2/12 | 3.0 | 3.0 | 3.0 | 3.8 | 3.9 | 10 | Drop then re-add the same column name; old field identity is reused. |
+| `late_event_close` | very_hard | 0.00 | trip | 0/12 | 44.5 |  | 44.5 | 64.9 | 64.9 | 0 | Processing-time close marks the event-time window done; late facts vanish. |
+
 ## How to read this
 
 More hops means the CoT broke into more claim/paragraph units. Longer hops means each unit is bigger. Tokens per hop is `reasoning_tokens / hop_count`. Think_s is stream time spent in the reasoning phase. A host can think longer by writing bigger hops, more hops, or by emitting more tokens inside similar hop counts.

@@ -3,6 +3,7 @@ from logic_trace import (
     hop_size_stats,
     hops_from_reasoning,
     host_hop_rollup,
+    task_hop_rollup,
 )
 
 
@@ -85,6 +86,39 @@ def test_host_hop_rollup_chars_per_hop():
     assert roll["novita"]["mean_chars_per_hop"] == 80
 
 
+def test_task_hop_rollup_bands_and_pass_fail_hops():
+    hops_ok = [{"chars": 20, "text": "a" * 20}]
+    hops_trip = [{"chars": 50, "text": "b" * 50}] * 8
+    rows = []
+    for i in range(3):
+        rows.append(
+            {
+                "task": "drop_resurrect",
+                "provider": "gmicloud",
+                "pass": True,
+                "quality": "equivalent",
+                "think_s": 2.0,
+                "hops": hops_ok,
+            }
+        )
+        rows.append(
+            {
+                "task": "late_event_close",
+                "provider": "gmicloud",
+                "pass": False,
+                "quality": "broken",
+                "think_s": 40.0,
+                "hops": hops_trip,
+            }
+        )
+    tasks = {t["task"]: t for t in task_hop_rollup(rows, difficulty_of={"drop_resurrect": "very_hard", "late_event_close": "very_hard"})}
+    assert tasks["drop_resurrect"]["band"] == "solved"
+    assert tasks["drop_resurrect"]["mean_hops_pass"] == 1
+    assert tasks["late_event_close"]["band"] == "trip"
+    assert tasks["late_event_close"]["mean_hops_fail"] == 8
+    assert tasks["late_event_close"]["estimated_difficulty"] == "very_hard"
+
+
 def test_write_observations_from_shipped_rollup(tmp_path):
     import importlib.util
     import json
@@ -99,6 +133,7 @@ def test_write_observations_from_shipped_rollup(tmp_path):
         json.dumps(
             {
                 "run_id": "OBS1",
+                "task": "drop_resurrect",
                 "provider": "gmicloud",
                 "pass": True,
                 "reasoning_tokens": 80,
@@ -111,6 +146,7 @@ def test_write_observations_from_shipped_rollup(tmp_path):
         + json.dumps(
             {
                 "run_id": "OBS1",
+                "task": "drop_resurrect",
                 "provider": "z-ai",
                 "pass": False,
                 "reasoning_tokens": 20,
@@ -136,6 +172,8 @@ def test_write_observations_from_shipped_rollup(tmp_path):
         assert "z-ai" in blob
         assert "hop" in blob.lower()
         assert "one-shot" in blob.lower() or "not tool" in blob.lower()
+        assert "very_hard" in blob or "complexity" in blob.lower()
+        assert "drop_resurrect" in blob
         assert "<script type=\"module\"" not in blob
     by = {h["provider"]: h for h in hosts}
     assert by["gmicloud"]["mean_chars_per_hop"] == 40
