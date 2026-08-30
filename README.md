@@ -30,11 +30,36 @@ Explanations live in `docs/solutions/` as prose. Comparable rows
 need a full `benchmark_repo_sha`, `grader_source_sha`, immutable
 grader image digest, prompt hash, and `environment_sha256`.
 
+## Replicate with one OpenRouter key
+
 ```sh
+git clone https://github.com/Evan-Kim2028/data-pipeline-eval.git
+cd data-pipeline-eval
 python -m pip install --require-hashes -r requirements.lock
+export OPENROUTER_API_KEY=sk-or-...   # or a one-line .env
+python verify.py                      # local, no spend
+python run_providers.py --spend --smoke
+```
+
+`--smoke` is one easy task on z-ai and novita. Request bodies match
+except `provider.only` (temp 0, effort high, no fallbacks). Scale:
+
+```sh
+python run_providers.py --spend --variance -k 1 --providers z-ai,novita
+python run_providers.py --spend --variance -k 5 --providers z-ai,novita,deepinfra,gmicloud,fireworks
+```
+
+Each run writes `logs/runs/<id>.jsonl` (gitignored) and
+`logs/runs/<id>/LAST_RUN.md`. Resume without re-spend:
+`--spend --continue-run <id>`. Turn a jsonl into tables with
+`python scripts/write_findings.py <jsonl> --out <dir>`. Harness lock:
+`docs/HARNESS.md`.
+
+## Official campaign (frozen pins)
+
+```sh
 python scripts/setup_eval.py --seed 42
 python verify.py --validate-catalog
-python verify.py
 python scripts/audit_tasks.py
 python run_providers.py --check-prompts
 python run_providers.py --campaign campaigns/official-v1.json --plan

@@ -74,6 +74,9 @@ MAX_TOKENS = 131072
 TEMPERATURE = 0
 REASONING_EFFORT = "high"
 HTTP_TIMEOUT_S = 600
+STALL_S = 45
+TRIAL_WALL_S = 240
+HOST_FAIL_STREAK = 3
 LOGS = ROOT / "logs"
 PRINT_LOCK = threading.Lock()
 LOG_LOCK = threading.Lock()
@@ -316,6 +319,86 @@ def trial_pairs(tasks: tuple[str, ...] | list[str], providers: list[str], k: int
     return [(t, p, trial) for t in tasks for trial in range(1, k + 1) for p in providers]
 
 
+def stream_abort(
+    *,
+    now: float,
+    last_token: float,
+    t0: float,
+    stall_s: float = STALL_S,
+    wall_s: float = TRIAL_WALL_S,
+) -> str | None:
+    if now - t0 >= wall_s:
+        return "wall"
+    if now - last_token >= stall_s:
+        return "stall"
+    return None
+
+
+def is_infra_error(err: str) -> bool:
+    low = err.lower()
+    return any(
+        token in low
+        for token in (
+            "http 429",
+            "stream stall",
+            "stream wall",
+            "stream error",
+            "host_skipped",
+            "empty content",
+        )
+    )
+
+
+def done_pair_keys(rows: list[dict]) -> set[tuple[str, str, int]]:
+    out: set[tuple[str, str, int]] = set()
+    for row in rows:
+        task = str(row.get("task") or "")
+        provider = str(row.get("provider") or "")
+        trial = int(row.get("trial") or 0)
+        if task and provider and trial:
+            out.add((task, provider, trial))
+    return out
+
+
+def remaining_pairs(
+    pairs: list[tuple[str, str, int]], done: set[tuple[str, str, int]]
+) -> list[tuple[str, str, int]]:
+    return [p for p in pairs if p not in done]
+
+
+class HostBreaker:
+    def __init__(self, streak: int = HOST_FAIL_STREAK) -> None:
+        self.streak = streak
+        self._fails: dict[str, int] = {}
+        self._skip: set[str] = set()
+        self._lock = threading.Lock()
+
+    def skipped(self, provider: str) -> bool:
+        with self._lock:
+            return provider in self._skip
+
+    def fail(self, provider: str) -> bool:
+        with self._lock:
+            n = self._fails.get(provider, 0) + 1
+            self._fails[provider] = n
+            if n >= self.streak:
+                self._skip.add(provider)
+                return True
+            return False
+
+    def ok(self, provider: str) -> None:
+        with self._lock:
+            self._fails[provider] = 0
+
+    def reset(self) -> None:
+        with self._lock:
+            self._fails.clear()
+            self._skip.clear()
+
+
+HOST_BREAKER = HostBreaker()
+
+
 def request_body(message: str, provider: str, *, require_parameters: bool = False) -> dict:
     provider_cfg: dict = {"only": [provider], "allow_fallbacks": False}
     if require_parameters:
@@ -366,6 +449,7 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
     )
     t0 = time.perf_counter()
     last_print = t0
+    last_token = t0
     phase = "wait"
     t_think = None
     t_patch = None
@@ -397,12 +481,31 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
     if resp is None:
         raise RuntimeError(f"HTTP 429 provider={provider}: {last_http.decode()[:400]}")
     try:
+        sock = getattr(getattr(resp, "fp", None), "raw", None)
+        sock = getattr(sock, "_sock", None)
+        if sock is not None:
+            sock.settimeout(STALL_S + 5)
+    except OSError:
+        pass
+    try:
         while True:
-            raw_line = resp.readline()
+            try:
+                raw_line = resp.readline()
+            except (TimeoutError, OSError) as exc:
+                raise RuntimeError(
+                    f"stream stall provider={provider} after {time.perf_counter() - t0:.0f}s "
+                    f"think={reason_n}c patch={content_n}c"
+                ) from exc
             if not raw_line:
                 break
             line = raw_line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
             now = time.perf_counter()
+            why = stream_abort(now=now, last_token=last_token, t0=t0)
+            if why:
+                raise RuntimeError(
+                    f"stream {why} provider={provider} after {now - t0:.0f}s "
+                    f"think={reason_n}c patch={content_n}c"
+                )
             if line.startswith(":"):
                 note = line[1:].strip() or "keepalive"
                 if now - last_print >= 2.0:
@@ -434,12 +537,14 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
             if r_bit:
                 reason_buf.append(r_bit)
                 reason_n += len(r_bit)
+                last_token = now
                 if t_think is None:
                     t_think = now
                 phase = "think"
             if c_bit:
                 content_buf.append(c_bit)
                 content_n += len(c_bit)
+                last_token = now
                 if t_patch is None:
                     t_patch = now
                 phase = "patch"
@@ -598,6 +703,12 @@ def _run_pair(
     row = _base_row(task, provider, trial, run_meta)
     tmp = None
     hops: list[dict] = []
+    if HOST_BREAKER.skipped(provider):
+        row["error"] = f"host_skipped provider={provider}"
+        _attach_fail_mode(row, [])
+        _record(run_meta, all_rows, spend, row)
+        _out(f"FAIL {task:22} {provider:14} t{trial} host_skipped")
+        return row
     try:
         _out(f">> {task}  {provider}  t{trial}  seeding checkout")
         tmp = _seed_tree(task)
@@ -679,6 +790,16 @@ def _run_pair(
     except Exception as exc:
         row["error"] = str(exc)[:400]
         _out(f"  {task}/{provider}  t{trial}  error: {row['error']}")
+        if is_infra_error(row["error"]):
+            if HOST_BREAKER.fail(provider):
+                _out(
+                    f"SKIP {provider}: {HOST_FAIL_STREAK} infra failures in a row "
+                    f"(429/stall/stream). Remaining {provider} pairs will not call OpenRouter."
+                )
+        else:
+            HOST_BREAKER.ok(provider)
+    else:
+        HOST_BREAKER.ok(provider)
     finally:
         if tmp is not None:
             shutil.rmtree(tmp.parent, ignore_errors=True)
@@ -992,6 +1113,11 @@ def main() -> int:
         help="Parallel (task, host) workers. 0 = min(8, number of pairs).",
     )
     ap.add_argument(
+        "--continue-run",
+        metavar="RUN",
+        help="Resume an incomplete bake-off jsonl (run id or path). Skip pairs already written.",
+    )
+    ap.add_argument(
         "--render-prompt",
         choices=ALL_TASKS,
         help="Print the official candidate message for one task. No network.",
@@ -1080,9 +1206,28 @@ def main() -> int:
     else:
         providers = [p.strip() for p in args.providers.split(",") if p.strip()]
     pairs = trial_pairs(tasks, providers, args.k)
-    jobs = args.jobs if args.jobs > 0 else min(DEFAULT_JOBS, max(1, len(pairs)))
     spend = [0.0]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    rows: list[dict] = []
+    HOST_BREAKER.reset()
+    if args.continue_run:
+        cont = Path(args.continue_run)
+        if not cont.suffix:
+            cont = LOGS / "runs" / f"{args.continue_run}.jsonl"
+        if not cont.is_file():
+            print(f"--continue-run not found: {cont}", file=sys.stderr)
+            return 2
+        prior = [json.loads(line) for line in cont.read_text().splitlines() if line.strip()]
+        done = done_pair_keys(prior)
+        skipped = len(pairs)
+        pairs = remaining_pairs(pairs, done)
+        skipped -= len(pairs)
+        rows = prior
+        spend[0] = sum(float(r.get("cost") or 0) for r in prior)
+        if prior:
+            run_id = str(prior[0].get("run_id") or run_id)
+        _out(f"continue {cont.name}  skip {skipped} written  {len(pairs)} left  spend~${spend[0]:.4f}")
+    jobs = args.jobs if args.jobs > 0 else min(DEFAULT_JOBS, max(1, len(pairs) or 1))
     sha, dirty = git_revision(ROOT)
     published = sha if not dirty else f"{sha}-dirty"
     run_meta = {
@@ -1100,11 +1245,23 @@ def main() -> int:
         "environment_sha256": environment_digest(ROOT),
         "comparable": not dirty,
     }
+    if args.continue_run and rows:
+        first = rows[0]
+        for key in (
+            "benchmark_repo_sha",
+            "environment_sha256",
+            "comparable",
+            "model",
+            "temperature",
+            "reasoning_effort",
+            "k",
+        ):
+            if key in first and first[key] is not None:
+                run_meta[key] = first[key]
     _out(
         f"run {run_id}  {len(pairs)} pairs  jobs={jobs}  k={args.k}  "
         f"effort={REASONING_EFFORT}  temp={TEMPERATURE}"
     )
-    rows: list[dict] = []
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         futs = [
             pool.submit(_run_pair, task, provider, trial, spend, run_meta, rows)

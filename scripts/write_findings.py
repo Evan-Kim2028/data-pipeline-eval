@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build markdown + disk-openable HTML from a bake-off jsonl.
 
-  python scripts/write_findings.py logs/runs/<run_id>.jsonl --out docs/findings
+  python scripts/write_findings.py logs/runs/<run_id>.jsonl --out /tmp/findings
 """
 
 from __future__ import annotations

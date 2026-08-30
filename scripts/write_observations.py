@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host hop observations from a bake-off jsonl + hop sidecars.
 
-  python scripts/write_observations.py logs/runs/<run_id>.jsonl --out docs/findings/observations
+  python scripts/write_observations.py logs/runs/<run_id>.jsonl --out /tmp/observations
 """
 
 from __future__ import annotations

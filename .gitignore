@@ -3,6 +3,7 @@ __pycache__/
 results.jsonl
 results/
 logs/
+docs/findings/
 .env
 *.pyc
 .venv/

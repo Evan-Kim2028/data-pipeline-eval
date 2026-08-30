@@ -53,6 +53,13 @@ python run_providers.py --spend --variance -k 1 --providers z-ai,novita
 python scripts/compare_trials.py logs/runs/<run_id>.jsonl
 ```
 
+Stream reads abort after 45s with no new tokens (`stream stall`) or
+240s wall (`stream wall`). Keepalives no longer keep a trial alive
+for hours. Three infra failures in a row for one host (HTTP 429,
+stall, stream drop) skip the rest of that host without more OpenRouter
+calls. Resume an incomplete bake-off with
+`--spend --continue-run <run_id>` — already-written pairs are skipped.
+
 `logs/LAST_RUN.md` is the latest table. A copy is also written to
 `logs/runs/<run_id>/LAST_RUN.md`. The jsonl for that run is rewritten
 in catalog task order, then provider, then trial.

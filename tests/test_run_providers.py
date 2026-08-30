@@ -9,12 +9,17 @@ from pathlib import Path
 from campaign_plan import expand, load_campaign
 from run_providers import (
     TRIAL_ROW_KEYS,
+    HostBreaker,
     _attach_fail_mode,
     _delta_piece,
     _write_last_run,
+    done_pair_keys,
     grade_env,
+    is_infra_error,
     print_campaign_plan,
+    remaining_pairs,
     request_body,
+    stream_abort,
     trial_pairs,
     usage_from_openrouter,
 )
@@ -123,6 +128,49 @@ def test_trial_row_keys_frozen():
     assert required <= set(TRIAL_ROW_KEYS)
 
 
+def test_stream_abort_stall_and_wall():
+    assert stream_abort(now=100.0, last_token=50.0, t0=0.0) == "stall"
+    assert stream_abort(now=250.0, last_token=249.0, t0=0.0) == "wall"
+    assert stream_abort(now=10.0, last_token=9.0, t0=0.0) is None
+    assert stream_abort(now=44.0, last_token=0.0, t0=0.0) is None
+
+
+def test_host_breaker_skips_after_streak():
+    br = HostBreaker(streak=3)
+    assert not br.skipped("baseten")
+    br.fail("baseten")
+    br.fail("baseten")
+    assert not br.skipped("baseten")
+    br.fail("baseten")
+    assert br.skipped("baseten")
+    br.ok("z-ai")
+    br.fail("z-ai")
+    assert not br.skipped("z-ai")
+
+
+def test_is_infra_error():
+    assert is_infra_error("HTTP 429 provider=baseten: rate-limited")
+    assert is_infra_error("stream stall provider=gmicloud after 45s")
+    assert is_infra_error("stream wall provider=gmicloud after 240s")
+    assert is_infra_error("stream error provider=gmicloud: Provider returned error")
+    assert not is_infra_error("patch_did_not_apply: hunk context is not unique")
+    assert not is_infra_error("FAILED tests/test_basis.py")
+
+
+def test_resume_skips_written_pairs():
+    rows = [
+        {"task": "watermark_poison", "provider": "z-ai", "trial": 1},
+        {"task": "watermark_poison", "provider": "novita", "trial": 1},
+    ]
+    done = done_pair_keys(rows)
+    pairs = trial_pairs(("watermark_poison",), ["z-ai", "novita"], 2)
+    left = remaining_pairs(pairs, done)
+    assert left == [
+        ("watermark_poison", "z-ai", 2),
+        ("watermark_poison", "novita", 2),
+    ]
+
+
 def test_trial_pairs_interleave_hosts():
     hosts = ["z-ai", "novita", "deepinfra", "gmicloud"]
     pairs = trial_pairs(("watermark_poison", "entity_reload"), hosts, 100)
@@ -181,6 +229,7 @@ def test_cli_has_k_and_variance():
     )
     assert "--variance" in proc.stdout
     assert "-k" in proc.stdout
+    assert "--continue-run" in proc.stdout
 
 
 def test_write_last_run_column_header(tmp_path, monkeypatch):
