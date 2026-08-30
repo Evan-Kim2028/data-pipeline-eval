@@ -10,11 +10,11 @@ estimates until that rate exists.
 
 | id | Label | What the incident is about |
 |---|---|---|
-| `schema` | Schema and types | Guessed column types, a date sent as timestamptz, mixed ids |
-| `time` | Time and calendars | Host clock versus warehouse dates |
-| `incremental` | Incremental I/O | Cheap skip checks that still plan a full scan |
-| `serving` | Serving contracts | What readers or the next run treat as current |
-| `concurrency` | Concurrent writers | Stale handles. Optimistic-concurrency retry |
+| `schema` | Schema and types | The job guessed the wrong type for a column. |
+| `time` | Time and calendars | The job used the wrong clock. |
+| `incremental` | Incremental I/O | The job thought it could skip work and still scanned everything. |
+| `serving` | Serving contracts | The next reader, or the next run, treated the wrong thing as current. |
+| `concurrency` | Concurrent writers | Two writers. A retry reused a stale table handle. |
 
 ## Difficulty (estimated)
 
