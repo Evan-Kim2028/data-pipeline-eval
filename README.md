@@ -1,21 +1,22 @@
 # data-pipeline-eval
 
-Fifteen broken lakehouse jobs. The model gets the pager text and
-writes a unified diff. Pytest grades the repair. Generic warehouse,
-not a product dump.
+This repository is a public eval of fifteen broken lakehouse jobs.
+The model reads the incident text and writes a unified diff. Pytest
+grades the repair. The warehouse is a generic lakehouse built for
+this eval.
 
 > ValueError: Invalid timestamp with zone: 2026-07-13
 >
 > The job never started the scan. Sidecar is behind.
 
-That one is `timestamptz_cutoff`. The other fourteen are the same
-shape: a real incident, a small edit, a hidden test that catches
-the almost-right patch.
+`timestamptz_cutoff` is the easy example. The other fourteen tasks
+follow the same shape. Each one is a real incident, a small edit,
+and a second test suite that fails an almost-right patch.
 
 ## Try it
 
-Python 3.14.3 (`.python-version`). `verify.py` warns if you are on
-something else.
+The pinned interpreter is Python 3.14.3 (`.python-version`).
+`verify.py` prints a warning when the running interpreter differs.
 
 ```sh
 git clone https://github.com/Evan-Kim2028/data-pipeline-eval.git
@@ -26,32 +27,39 @@ python -m pip install --require-hashes -r requirements.lock
 python verify.py
 ```
 
-Every task should fail on `tasks/<id>/fault` and pass after the
-gold patch. Then, with an OpenRouter key (`--spend` calls a host):
+`verify.py` fails each task on the broken files in `tasks/<id>/fault`
+and passes it after the gold patch.
+
+An OpenRouter key is required to call a host. Pass `--spend` when
+you want provider calls.
 
 ```sh
 export OPENROUTER_API_KEY=sk-or-...   # or a one-line .env
 python run_providers.py --spend --smoke
 ```
 
-`--smoke` is that timestamptz bug on z-ai and novita. Same request
-body except `provider.only` (temp 0, effort high, no fallbacks).
+`--smoke` runs `timestamptz_cutoff` on z-ai and novita. Request
+bodies match except `provider.only`. Sampling stays at temperature
+0 with high effort and fallbacks disabled.
+
+These commands scale the same setup:
 
 ```sh
 python run_providers.py --spend --variance -k 1 --providers z-ai,novita
 python run_providers.py --spend --variance -k 5 --providers z-ai,novita,deepinfra,gmicloud,fireworks
 ```
 
-Runs land in `logs/runs/<id>.jsonl`. Resume with
-`--spend --continue-run <id>`. Tables:
-`python scripts/write_findings.py <jsonl> --out <dir>`.
-Lock: `docs/HARNESS.md`. Catalog: `harness/catalog.py`.
+Each run writes `logs/runs/<id>.jsonl`. Resume an incomplete run
+with `--spend --continue-run <id>`. Build tables with
+`python scripts/write_findings.py <jsonl> --out <dir>`. The request
+lock is `docs/HARNESS.md`. The catalog is `harness/catalog.py`.
 
 ## The fifteen tasks
 
-Five kinds of break, then easy → very hard. `calibration` is two
-warm-ups. `default` is the rest. Difficulty is an estimate
-(`docs/TAXONOMY.md`).
+Tasks are grouped by kind of incident and ordered from easy to
+very hard. The `calibration` suite is two warm-up tasks. The
+`default` suite is the other thirteen. Difficulty is an estimate.
+See `docs/TAXONOMY.md`.
 
 | Kind | What breaks |
 |---|---|
@@ -59,7 +67,7 @@ warm-ups. `default` is the rest. Difficulty is an estimate
 | `time` | The job used the wrong clock. |
 | `incremental` | A cheap skip check that still plans a full scan. |
 | `serving` | Readers, or the next run, treat the wrong thing as current. |
-| `concurrency` | Stale table handle. Retry that does not re-read. |
+| `concurrency` | A stale table handle. A retry that reuses it. |
 
 | Task | Kind | Difficulty | Suite |
 |---|---|---|---|
@@ -79,7 +87,8 @@ warm-ups. `default` is the rest. Difficulty is an estimate
 | `drop_resurrect` | serving | very_hard | default |
 | `occ_retry` | concurrency | hard | default |
 
-Practice tests: `tasks/<id>/tests`. Second suite:
-`tasks/<id>/tests_adjudication`. Both public, both grade, neither
-goes in the official prompt. Gold is `warehouse/`. Writeups:
-`docs/solutions/`.
+Practice tests live in `tasks/<id>/tests`. A second suite lives in
+`tasks/<id>/tests_adjudication`. Both directories are public and
+both run at grade time. Official prompts include the incident and
+production files. Gold code lives in `warehouse/`. Prose writeups
+live in `docs/solutions/`.

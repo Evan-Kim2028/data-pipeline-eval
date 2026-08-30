@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Each task fails on the broken warehouse and passes after the gold patch. No network.
+"""Fail each task on the broken warehouse and pass it after the gold patch.
 
-Practice: tasks/<id>/tests
-Also graded, omitted from official prompts: tasks/<id>/tests_adjudication
+This path stays offline. Practice tests live in tasks/<id>/tests.
+A second suite lives in tasks/<id>/tests_adjudication. Official
+prompts include the incident and production files.
 """
 
 from __future__ import annotations
