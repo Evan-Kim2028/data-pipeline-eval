@@ -1,0 +1,64 @@
+{
+  "hops": [
+    {
+      "i": 0,
+      "chars": 348,
+      "text": "We need to fix the bug: late facts (event_at inside window, processing_at after closed_processing_at) are dropped. The window should be event-time: facts with event_at in window should be included regardless of processing_at? But there's a lateness concept \u2014 lateness allows facts arriving after window close to still join if within lateness bound."
+    },
+    {
+      "i": 1,
+      "chars": 393,
+      "text": "The bug: `ingest` filters `event[\"processing_at\"] <= closed_processing_at`, dropping late facts. The fix: allow facts whose processing_at is within lateness after window end \u2014 i.e., accept facts with event_at in window even if processing_at > closed_processing_at, as long as processing_at <= end + lateness? Actually lateness is a duration string like \"1 day\"? Here lateness=end which is odd."
+    },
+    {
+      "i": 2,
+      "chars": 406,
+      "text": "The scenario: fact arrived next day (processing_at next day), window closed on processing time. Ops thought event-time. Fix: window close should be based on event time with lateness allowance \u2014 a fact joins the window if event_at in [start, end], regardless of processing_at (or up to lateness). Since lateness is passed as `end` (a timestamp), perhaps lateness means the latest processing_at allowed? Hmm."
+    },
+    {
+      "i": 3,
+      "chars": 376,
+      "text": "Simplest correct fix: in `ingest`, drop the processing_at check, or replace with lateness check: accept if event_at in window and processing_at <= lateness bound. Given lateness=end, that would still drop next-day facts. So the fix should be: event-time windows include facts based on event_at only; processing_at check should be removed (or lateness applied to event_at? No)."
+    },
+    {
+      "i": 4,
+      "chars": 430,
+      "text": "The bug is \"window closed on processing time\" \u2014 the close should be event-time. So `ingest` should include facts with event_at in window regardless of processing_at. The `closed_processing_at` parameter becomes irrelevant for inclusion... but maybe keep signature. Perhaps lateness: allow facts whose processing_at exceeds window close but event_at within window \u2014 that's exactly event-time semantics with unbounded lateness here."
+    },
+    {
+      "i": 5,
+      "chars": 426,
+      "text": "I'll fix `ingest` to not filter on processing_at (event-time window: membership determined by event_at; lateness allows late facts to join). Keep `in_processing_window` unchanged (it's the processing-time variant, presumably used elsewhere/tests). Also `in_event_window` passes lateness=end \u2014 maybe change to pass lateness properly. But we can only edit event_time.py. Tests may check that in_event_window includes late facts."
+    },
+    {
+      "i": 6,
+      "chars": 12,
+      "text": "Minimal fix:"
+    },
+    {
+      "i": 7,
+      "chars": 226,
+      "text": "```python\ndef ingest(self, events, closed_processing_at):\n    for event in events:\n        if start_bound(event, self.start, self.end):\n            self.facts[event[\"event_id\"]] = event\n    return list(self.facts.values())\n```"
+    },
+    {
+      "i": 8,
+      "chars": 513,
+      "text": "But maybe lateness should bound how late: processing_at <= end + lateness? lateness is a string equal to end here \u2014 ambiguous. Given the fault description: \"Late facts never joined that window\" \u2014 fix is to join late facts whose event_at is in window. I'll implement: accept if event_at in window; additionally, if processing_at > closed_processing_at (late), still accept since window is event-time (lateness permits). Perhaps use lateness as max processing_at allowed? lateness=end would exclude next-day. So no."
+    },
+    {
+      "i": 9,
+      "chars": 167,
+      "text": "I'll write the fix with a comment explaining event-time semantics: membership by event_at; processing_at only recorded. Keep closed_processing_at param for API compat."
+    },
+    {
+      "i": 10,
+      "chars": 198,
+      "text": "Also maybe `in_event_window` should pass lateness differently \u2014 but lateness=end is weird; leave it, or interpret lateness as the event-time upper bound already covered by end. I'll just fix ingest."
+    },
+    {
+      "i": 11,
+      "chars": 21,
+      "text": "Provide unified diff."
+    }
+  ]
+}

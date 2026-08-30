@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from catalog import TASKS, all_ids
-from prompt_bundle import all_bundles, bundle_for
+from prompt_bundle import SHARED_INSTRUCTIONS, all_bundles, bundle_for
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "tests" / "snapshots" / "prompt-sha256.json"
@@ -55,3 +55,14 @@ def test_all_official_prompts_match_snapshot_and_omit_denied_paths():
 def test_snapshot_has_exactly_fifteen_tasks():
     snap = json.loads(SNAPSHOT.read_text())
     assert len(snap["tasks"]) == 15
+
+
+def test_cot_scaffold_is_unbiased():
+    text = SHARED_INSTRUCTIONS.lower()
+    assert "held-out" not in text
+    assert "pytest" not in text
+    assert "state each reasoning claim once" in text
+    for task in TASKS:
+        line = task.one_liner.strip()
+        if line:
+            assert line.lower() not in text

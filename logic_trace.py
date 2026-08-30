@@ -138,11 +138,45 @@ def trial_hop_stats(row: dict, hops: list[dict] | None = None) -> dict:
     )
     stats["pass"] = bool(row.get("pass"))
     stats["quality"] = row.get("quality")
+    stats["fail_mode"] = cot_fail_mode(
+        passed=bool(row.get("pass")),
+        quality=None if row.get("quality") is None else str(row.get("quality")),
+        hops=hops or [],
+    )
+    stats["restated"] = restated_diagnosis(hops or [])
     return stats
 
 
 def _mean(vals: list[float]) -> float | None:
     return sum(vals) / len(vals) if vals else None
+
+
+OVERTHINK_HOPS = 8
+
+
+def restated_diagnosis(hops: list[dict]) -> bool:
+    stems: list[tuple[str, ...]] = []
+    for hop in hops:
+        words = [w.lower() for w in str(hop.get("text") or "").split()[:8]]
+        if len(words) >= 4:
+            stems.append(tuple(words[:6]))
+    if len(stems) < 3:
+        return False
+    counts: dict[tuple[str, ...], int] = {}
+    for stem in stems:
+        counts[stem] = counts.get(stem, 0) + 1
+    return max(counts.values()) >= 3
+
+
+def cot_fail_mode(*, passed: bool, quality: str | None, hops: list[dict]) -> str:
+    q = str(quality or "")
+    if passed:
+        return "pass"
+    if q.startswith("patch_did_not") or q.startswith("invalid_patch"):
+        return "apply_fail"
+    if len(hops) >= OVERTHINK_HOPS or restated_diagnosis(hops):
+        return "overthink"
+    return "short_wrong"
 
 
 def host_hop_rollup(rows: list[dict]) -> list[dict]:
@@ -161,6 +195,10 @@ def host_hop_rollup(rows: list[dict]) -> list[dict]:
         trials = by[provider]
         def col(key: str) -> list[float]:
             return [float(t[key]) for t in trials if isinstance(t.get(key), (int, float))]
+        fail_modes: dict[str, int] = {}
+        for t in trials:
+            mode = str(t.get("fail_mode") or "")
+            fail_modes[mode] = fail_modes.get(mode, 0) + 1
         out.append(
             {
                 "provider": provider,
@@ -174,6 +212,7 @@ def host_hop_rollup(rows: list[dict]) -> list[dict]:
                 "mean_think_s": _mean(col("think_s")),
                 "mean_tokens_per_think_s": _mean(col("tokens_per_think_s")),
                 "mean_latency_s": _mean(col("latency_s")),
+                "fail_modes": fail_modes,
             }
         )
     return out
@@ -212,12 +251,11 @@ def task_hop_rollup(rows: list[dict], *, difficulty_of: dict[str, str] | None = 
             band = "trip"
         else:
             band = "mixed"
-        apply_fail = sum(
-            1
-            for t in trials
-            if str(t.get("quality") or "").startswith("patch_did_not")
-            or str(t.get("quality") or "").startswith("invalid_patch")
-        )
+        apply_fail = sum(1 for t in trials if t.get("fail_mode") == "apply_fail")
+        fail_modes: dict[str, int] = {}
+        for t in trials:
+            mode = str(t.get("fail_mode") or "")
+            fail_modes[mode] = fail_modes.get(mode, 0) + 1
         host_pass: dict[str, list[int]] = {}
         for row, stats in pairs:
             p = str(row.get("provider") or "")
@@ -235,6 +273,7 @@ def task_hop_rollup(rows: list[dict], *, difficulty_of: dict[str, str] | None = 
                 "band": band,
                 "qualities": qualities,
                 "apply_fail": apply_fail,
+                "fail_modes": fail_modes,
                 "mean_hops": _mean([float(t["hop_count"]) for t in trials]),
                 "mean_hops_pass": _mean(pass_h),
                 "mean_hops_fail": _mean(fail_h),

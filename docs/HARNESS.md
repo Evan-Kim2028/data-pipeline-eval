@@ -15,8 +15,15 @@ Model slug `z-ai/glm-5.3-flash`. Thinking cannot be disabled.
 Official candidate messages come from `prompt_bundle.py`: incident,
 entrypoint, editable paths, instructions, and faulted production
 context. Tests and answers stay in the clone and never enter that
-message. `python run_providers.py --check-prompts` reprints SHA-256
-digests.
+message. Shared instructions ask for one reasoning claim, then the
+edit, then one unified diff, without naming tests, gold files, or
+task mechanisms. `python run_providers.py --check-prompts` reprints
+SHA-256 digests. Changing that sentence is a new prompt campaign.
+
+Hop-trace fail modes (`logic_trace.cot_fail_mode`) fold hop lists plus
+trial quality: `pass`, `apply_fail`, `overthink` (hop_count ≥ 8 or the
+same first-six-word stem on ≥ 3 hops), `short_wrong`. Gold solution
+text is not a classifier input.
 
 Bake-off apply unwraps markdown fences and prefers a diff/patch
 fence or a body that starts with `diff --git` / `--- a/`. A leading

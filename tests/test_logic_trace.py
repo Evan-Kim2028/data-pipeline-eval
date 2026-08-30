@@ -1,10 +1,17 @@
+from pathlib import Path
+
 from logic_trace import (
     attach_throughput,
+    cot_fail_mode,
     hop_size_stats,
     hops_from_reasoning,
     host_hop_rollup,
+    load_hops_file,
+    restated_diagnosis,
     task_hop_rollup,
 )
+
+FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "hops"
 
 
 def test_hops_split_paragraphs_and_numbers():
@@ -82,6 +89,7 @@ def test_host_hop_rollup_chars_per_hop():
     assert roll["gmicloud"]["mean_hops"] == 2
     assert roll["gmicloud"]["mean_chars_per_hop"] == 400
     assert roll["gmicloud"]["mean_tokens_per_hop"] == 100
+    assert roll["gmicloud"]["fail_modes"]["pass"] == 1
     assert roll["novita"]["mean_hops"] == 1
     assert roll["novita"]["mean_chars_per_hop"] == 80
 
@@ -117,6 +125,28 @@ def test_task_hop_rollup_bands_and_pass_fail_hops():
     assert tasks["late_event_close"]["band"] == "trip"
     assert tasks["late_event_close"]["mean_hops_fail"] == 8
     assert tasks["late_event_close"]["estimated_difficulty"] == "very_hard"
+    assert tasks["late_event_close"]["fail_modes"]["overthink"] == 3
+
+
+def test_cot_fail_mode_from_committed_hop_fixtures():
+    short = load_hops_file(FIXTURES / "short-drop_resurrect.json")
+    late = load_hops_file(FIXTURES / "overthink-late_event_close.json")
+    frozen = load_hops_file(FIXTURES / "overthink-frozen_basis.json")
+    assert cot_fail_mode(passed=True, quality="equivalent", hops=short) == "pass"
+    assert cot_fail_mode(passed=False, quality="broken", hops=short) == "short_wrong"
+    assert cot_fail_mode(passed=False, quality="held_fail", hops=short) == "short_wrong"
+    assert cot_fail_mode(passed=False, quality="broken", hops=late) == "overthink"
+    assert cot_fail_mode(passed=False, quality="broken", hops=frozen) == "overthink"
+    assert (
+        cot_fail_mode(passed=False, quality="patch_did_not_apply", hops=late)
+        == "apply_fail"
+    )
+    assert len(late) >= 8
+    assert len(frozen) >= 8
+    repeated = [{"text": "The bug is watermark advancing too soon extra"}] * 3
+    assert restated_diagnosis(repeated) is True
+    assert cot_fail_mode(passed=False, quality="broken", hops=repeated) == "overthink"
+    assert restated_diagnosis(short) is False
 
 
 def test_write_observations_from_shipped_rollup(tmp_path):
@@ -174,6 +204,7 @@ def test_write_observations_from_shipped_rollup(tmp_path):
         assert "one-shot" in blob.lower() or "not tool" in blob.lower()
         assert "very_hard" in blob or "complexity" in blob.lower()
         assert "drop_resurrect" in blob
+        assert "fail mode" in blob.lower() or "overthink" in blob or "apply_fail" in blob or "pass:" in blob
         assert "<script type=\"module\"" not in blob
     by = {h["provider"]: h for h in hosts}
     assert by["gmicloud"]["mean_chars_per_hop"] == 40

@@ -1,0 +1,19 @@
+{
+  "hops": [
+    {
+      "i": 0,
+      "chars": 150,
+      "text": "The bug: `get_or_create` resurrects dropped tables. Fix: check tombstones and raise instead of recreating. Editable path: warehouse/lifecycle.py only."
+    },
+    {
+      "i": 1,
+      "chars": 211,
+      "text": "Fix get_or_create to raise RuntimeError if name in tombstones. Also, should create() be consistent? create already raises. The fix: in get_or_create, if name in tombstones, raise RuntimeError(f\"dropped:{name}\")."
+    },
+    {
+      "i": 2,
+      "chars": 20,
+      "text": "Return unified diff."
+    }
+  ]
+}

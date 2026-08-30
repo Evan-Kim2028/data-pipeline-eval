@@ -25,7 +25,9 @@ DENIED_MARKERS = (
 SHARED_INSTRUCTIONS = (
     "The checkout is the warehouse package at its current (faulted) revision.\n"
     "Edit only the disclosed files. Return one unified diff against that checkout.\n"
-    "Do not add, delete, or rename files. Do not modify tests."
+    "Do not add, delete, or rename files. Do not modify tests.\n"
+    "State each reasoning claim once: what the checkout does now, then the edit, "
+    "then one unified diff. Do not restate a prior claim."
 )
 
 

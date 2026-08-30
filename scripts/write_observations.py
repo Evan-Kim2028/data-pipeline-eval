@@ -104,7 +104,7 @@ def _task_read(tasks: list[dict], one_liners: dict[str, str]) -> str:
             names = ", ".join(f"`{t['task']}` hops {_fmt(t.get('mean_hops'), 1)} think {_fmt(t.get('mean_think_s'), 1)}s" for t in explode)
             bits.append(
                 f"Where they trip by overthinking: {names}. "
-                "The CoT restates the same diagnosis instead of locking a patch that matches held-out tests."
+                "Fail mode `overthink` is hop_count ≥ 8 or restated diagnosis, not extra tool hops."
             )
             worst = max(explode, key=lambda t: t.get("mean_think_s") or 0)
             bits.append(
@@ -138,6 +138,40 @@ def _mean(vals: list) -> float | None:
     return sum(nums) / len(nums) if nums else None
 
 
+def _mode_s(modes: dict | None) -> str:
+    return ", ".join(f"{k}:{v}" for k, v in sorted((modes or {}).items()) if v)
+
+
+def _fail_mode_read(hosts: list[dict], tasks: list[dict]) -> str:
+    totals: dict[str, int] = {}
+    for t in tasks:
+        for k, v in (t.get("fail_modes") or {}).items():
+            totals[k] = totals.get(k, 0) + int(v)
+    n = sum(totals.values())
+    host_bits = []
+    for h in hosts:
+        modes = h.get("fail_modes") or {}
+        over = int(modes.get("overthink") or 0)
+        apply_n = int(modes.get("apply_fail") or 0)
+        short = int(modes.get("short_wrong") or 0)
+        host_bits.append(
+            f"{h['provider']} overthink {over} apply_fail {apply_n} short_wrong {short}"
+        )
+    return (
+        "Fail modes are a fold over hop lists plus trial quality. "
+        "Gold solution text is not a classifier input. "
+        f"Across {n} trials: "
+        + ", ".join(f"{k} {v}" for k, v in sorted(totals.items()) if v)
+        + ". "
+        "`pass` is shown plus held-out pytest. "
+        "`apply_fail` is a unified diff that did not apply. "
+        "`overthink` is a fail with hop_count ≥ 8 or the same first-six-word stem on ≥ 3 hops. "
+        "`short_wrong` is a fail with a short CoT that still missed the grade. "
+        + "; ".join(host_bits)
+        + "."
+    )
+
+
 def markdown(run_id: str, hosts: list[dict], tasks: list[dict], one_liners: dict[str, str]) -> str:
     lines = [
         "# Observations: GMI Cloud think time vs hop traces",
@@ -146,6 +180,8 @@ def markdown(run_id: str, hosts: list[dict], tasks: list[dict], one_liners: dict
         "not tool-call spans and not an agent loop. No winner rank.",
         "",
         _gmi_read(hosts),
+        "",
+        _fail_mode_read(hosts, tasks),
         "",
         "## Host hop size",
         "",
@@ -166,16 +202,16 @@ def markdown(run_id: str, hosts: list[dict], tasks: list[dict], one_liners: dict
         "",
         _task_read(tasks, one_liners),
         "",
-        "| task | catalog | empirical | band | pass | mean hops | hops on pass | hops on fail | mean think_s | think on fail | apply fail | mechanism |",
-        "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| task | catalog | empirical | band | pass | mean hops | hops on pass | hops on fail | mean think_s | fail modes | mechanism |",
+        "|---|---|---:|---|---:|---:|---:|---:|---:|---|---|",
     ]
     for t in tasks:
         lines.append(
             f"| `{t['task']}` | {t.get('estimated_difficulty') or ''} | {_fmt(t.get('rate'), 2)} | "
             f"{t.get('band')} | {t['n_pass']}/{t['n']} | {_fmt(t.get('mean_hops'), 1)} | "
             f"{_fmt(t.get('mean_hops_pass'), 1)} | {_fmt(t.get('mean_hops_fail'), 1)} | "
-            f"{_fmt(t.get('mean_think_s'), 1)} | {_fmt(t.get('mean_think_s_fail'), 1)} | "
-            f"{t.get('apply_fail')} | {one_liners.get(t['task'], '')} |"
+            f"{_fmt(t.get('mean_think_s'), 1)} | {_mode_s(t.get('fail_modes'))} | "
+            f"{one_liners.get(t['task'], '')} |"
         )
     lines += [
         "",
@@ -183,12 +219,14 @@ def markdown(run_id: str, hosts: list[dict], tasks: list[dict], one_liners: dict
         "",
         "More hops means the CoT broke into more claim/paragraph units. Longer hops means each unit is bigger. "
         "Tokens per hop is `reasoning_tokens / hop_count`. Think_s is stream time spent in the reasoning phase. "
-        "A host can think longer by writing bigger hops, more hops, or by emitting more tokens inside similar hop counts.",
+        "A host can think longer by writing bigger hops, more hops, or by emitting more tokens inside similar hop counts. "
+        "Catalog `very_hard` does not predict hop load. Failures split by mode, not by host rank.",
         "",
         "See [Findings 2](../2/FINDINGS.html) for pass/quality and TPS on the same rows. "
         "Findings 1 (an earlier four-host mix) had GMI mean latency 58.7s and mean reason_tok 2033. "
         "This hop-traced run does not repeat that gap. GMI still has the highest latency here, "
-        "but mean think_s sits next to deepinfra.",
+        "but mean think_s sits next to deepinfra. Shared instructions now ask for one claim then one diff; "
+        "a later spend on that prompt is a new campaign vs this run.",
         "",
     ]
     return "\n".join(lines)
@@ -222,6 +260,7 @@ def html_doc(run_id: str, hosts: list[dict], tasks: list[dict], one_liners: dict
 <p>Run <code>{html.escape(run_id)}</code>. One-shot CoT. Hops are paragraph/claim cuts of the reasoning blob,
 not tool-call spans and not an agent loop. No winner rank.</p>
 <p>{html.escape(_gmi_read(hosts))}</p>
+<p>{html.escape(_fail_mode_read(hosts, tasks))}</p>
 <h2>Host hop size</h2>
 <table>
 <tr><th>provider</th><th>n</th><th>pass</th><th>mean hops</th><th>mean chars/hop</th><th>mean chars</th><th>mean reason_tok</th><th>mean tokens/hop</th><th>mean think_s</th><th>reason tok / think_s</th><th>mean latency_s</th></tr>
@@ -230,7 +269,7 @@ not tool-call spans and not an agent loop. No winner rank.</p>
 <h2>Task complexity</h2>
 <p>{html.escape(_task_read(tasks, one_liners))}</p>
 <table>
-<tr><th>task</th><th>catalog</th><th>empirical</th><th>band</th><th>pass</th><th>mean hops</th><th>hops on pass</th><th>hops on fail</th><th>mean think_s</th><th>think on fail</th><th>apply fail</th><th>mechanism</th></tr>
+<tr><th>task</th><th>catalog</th><th>empirical</th><th>band</th><th>pass</th><th>mean hops</th><th>hops on pass</th><th>hops on fail</th><th>mean think_s</th><th>fail modes</th><th>mechanism</th></tr>
 {''.join(
     "<tr>" + "".join(
         f"<td>{html.escape(str(x))}</td>"
@@ -244,8 +283,7 @@ not tool-call spans and not an agent loop. No winner rank.</p>
             _fmt(t.get("mean_hops_pass"), 1),
             _fmt(t.get("mean_hops_fail"), 1),
             _fmt(t.get("mean_think_s"), 1),
-            _fmt(t.get("mean_think_s_fail"), 1),
-            t.get("apply_fail"),
+            _mode_s(t.get("fail_modes")),
             one_liners.get(t["task"], ""),
         ]
     ) + "</tr>"
@@ -254,10 +292,12 @@ not tool-call spans and not an agent loop. No winner rank.</p>
 </table>
 <h2>How to read this</h2>
 <p>More hops means the CoT broke into more claim/paragraph units. Longer hops means each unit is bigger.
-Tokens per hop is reasoning_tokens / hop_count. Think_s is stream time spent in the reasoning phase.</p>
+Tokens per hop is reasoning_tokens / hop_count. Think_s is stream time spent in the reasoning phase.
+Catalog very_hard does not predict hop load. Failures split by mode, not by host rank.</p>
 <p>See <a href="../2/FINDINGS.html">Findings 2</a> for pass/quality and TPS on the same rows.
 Findings 1 had GMI mean latency 58.7s and mean reason_tok 2033. This hop-traced run does not repeat that gap.
-GMI still has the highest latency here, but mean think_s sits next to deepinfra.</p>
+GMI still has the highest latency here, but mean think_s sits next to deepinfra.
+Shared instructions now ask for one claim then one diff; a later spend on that prompt is a new campaign vs this run.</p>
 """
     return (
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"

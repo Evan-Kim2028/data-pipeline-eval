@@ -1,0 +1,74 @@
+{
+  "hops": [
+    {
+      "i": 0,
+      "chars": 211,
+      "text": "We need to diagnose: first load of empty gold table. Snapshot had no rows, so uniquing against snapshot should be a no-op, but unique still planned a full dedupe of the chunk. RSS climbed, job hung, never wrote."
+    },
+    {
+      "i": 1,
+      "chars": 1104,
+      "text": "The bug: `merge_incoming` concatenates existing + incoming and runs unique_fn over everything. On first load, existing is empty, so it should just return incoming without dedupe \u2014 or at least the merge strategy should be \"incoming\" mode: when existing is empty, skip uniquing entirely (snapshot had no rows, so nothing to unique against). The chunk itself was already uniqued against the snapshot... wait, \"Each incoming chunk was uniqued against a start-of-run snapshot that had no rows. unique still planned a full dedupe of the chunk.\" So the merge step re-runs unique over the whole chunk even though the snapshot was empty \u2014 meaning unique against empty existing is pointless. The fix: merge_incoming should only unique the incoming against existing, not re-dedupe the incoming itself. Actually the semantics: \"merge_incoming\" presumably means unique incoming against existing only, preserving existing as-is. The current implementation concatenates and dedupes everything \u2014 that's the bug: it re-dedupes the incoming chunk (full dedupe of the chunk), which on a large first load blows memory/hangs."
+    },
+    {
+      "i": 2,
+      "chars": 23,
+      "text": "Correct implementation:"
+    },
+    {
+      "i": 3,
+      "chars": 169,
+      "text": "```python\ndef merge_incoming(existing, incoming, unique_fn):\n    if not existing:\n        return list(incoming)\n    return unique_fn(list(existing) + list(incoming))\n```"
+    },
+    {
+      "i": 4,
+      "chars": 392,
+      "text": "Hmm, but even with existing non-empty, \"merge_incoming\" semantics might be: unique only incoming against existing keys. But we only have unique_fn as a black box. The minimal fix consistent with the incident: when existing is empty (first load), skip the dedupe entirely \u2014 the snapshot had no rows so there's nothing to unique against, and the chunk was already uniqued against that snapshot."
+    },
+    {
+      "i": 5,
+      "chars": 294,
+      "text": "Also FirstLoadState.absorb returns list(incoming) \u2014 that seems fine? FirstLoadState has rows and seen but absorb ignores seen. Maybe absorb should track seen keys? The entrypoint is merge_first_load, which uses merge_incoming. The editable file is basis.py. The fix should be in merge_incoming."
+    },
+    {
+      "i": 6,
+      "chars": 246,
+      "text": "But wait \u2014 why would unique over the chunk hang? unique_fn is a black box; presumably it's expensive/memory-heavy. The point: on first load with empty existing, calling unique_fn is unnecessary work. The fix: short-circuit when existing is empty."
+    },
+    {
+      "i": 7,
+      "chars": 139,
+      "text": "Also merge_always_unique \u2014 name says \"always unique\", so leave it as-is (it's intentionally always deduping). Only merge_incoming is wrong."
+    },
+    {
+      "i": 8,
+      "chars": 306,
+      "text": "Should we also fix FirstLoadState.absorb? It returns list(incoming) without deduping against seen. But the incident is about merge_first_load path. absorb isn't used by the entrypoint. Minimal fix: merge_incoming short-circuit. Maybe also make absorb track seen? Not needed; keep diff minimal and targeted."
+    },
+    {
+      "i": 9,
+      "chars": 562,
+      "text": "Actually, consider: maybe merge_incoming should unique incoming against existing only \u2014 i.e., pass unique_fn(existing + incoming) is the \"always unique\" behavior. The distinction between merge_always_unique and merge_incoming suggests merge_incoming should NOT re-unique existing rows. But with unique_fn as a set-like dedupe function, we can't unique only incoming against existing without knowing keys. However, we could do: unique_fn(list(existing) + list(incoming)) \u2014 that dedupes everything including existing, which changes existing rows' order/dupes. Hmm."
+    },
+    {
+      "i": 10,
+      "chars": 159,
+      "text": "Given the incident is specifically first load (existing empty), the targeted fix is the empty-existing short-circuit. That's the minimal, safe fix. I'll write:"
+    },
+    {
+      "i": 11,
+      "chars": 207,
+      "text": "```python\ndef merge_incoming(existing: list[dict], incoming: list[dict], unique_fn) -> list[dict]:\n    if not existing:\n        return list(incoming)\n    return unique_fn(list(existing) + list(incoming))\n```"
+    },
+    {
+      "i": 12,
+      "chars": 61,
+      "text": "Should we copy incoming? list(incoming) shallow copy is fine."
+    },
+    {
+      "i": 13,
+      "chars": 38,
+      "text": "Provide unified diff with explanation."
+    }
+  ]
+}
