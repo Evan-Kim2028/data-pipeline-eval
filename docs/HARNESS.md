@@ -21,11 +21,17 @@ task mechanisms. `python run_providers.py --check-prompts` reprints
 SHA-256 digests. Changing that sentence is a new prompt campaign.
 
 Hop-trace fail modes (`logic_trace.cot_fail_mode`) fold hop lists plus
-trial quality: `pass`, `apply_fail`, `overthink` (hop_count ≥ 8 or the
-same first-six-word stem on ≥ 3 hops), `short_wrong`, `no_response`
-(no quality tag and no hops — HTTP 429 or stream drop). Gold solution
-text is not a classifier input. `no_response` trials stay in n and
-fail-mode counts; hop and think means skip them.
+trial quality. Tokens stay `pass`, `apply_fail`, `overthink`,
+`short_wrong`, `no_response`. In prose: pass means shown tests and
+hidden tests both succeeded; apply-fail means `git apply` rejected the
+diff; overthink means a fail with 8 or more hops or the same opening
+diagnosis restated three times (one-shot CoT cuts, not tool calls);
+short-wrong means a short CoT that still missed the grade; no-reply
+means no quality tag and no hops (HTTP 429 or stream drop), not
+short-wrong. Gold solution text is not a classifier input.
+`no_response` trials stay in n and fail-mode counts; hop and think
+means skip them. Each trial row stores `fail_mode`. Bake-off request
+bodies match except `provider.only`.
 
 Bake-off apply unwraps markdown fences and prefers a diff/patch
 fence or a body that starts with `diff --git` / `--- a/`. A leading

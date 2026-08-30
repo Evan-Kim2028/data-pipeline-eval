@@ -9,10 +9,12 @@ from pathlib import Path
 from campaign_plan import expand, load_campaign
 from run_providers import (
     TRIAL_ROW_KEYS,
+    _attach_fail_mode,
     _delta_piece,
     _write_last_run,
     grade_env,
     print_campaign_plan,
+    request_body,
     usage_from_openrouter,
 )
 
@@ -110,10 +112,52 @@ def test_trial_row_keys_frozen():
         "cost_prompt",
         "files_changed_n",
         "hop_count",
+        "fail_mode",
         "tps_out",
         "think_s",
+        "raw_path",
+        "hops_path",
+        "cached_tokens",
     }
     assert required <= set(TRIAL_ROW_KEYS)
+
+
+def test_request_body_hosts_match_except_provider_only():
+    a = request_body("checkout", "z-ai")
+    b = request_body("checkout", "gmicloud")
+    assert a["model"] == b["model"] == "z-ai/glm-5.3-flash"
+    assert a["temperature"] == b["temperature"] == 0
+    assert a["max_tokens"] == b["max_tokens"] == 131072
+    assert a["reasoning"] == b["reasoning"] == {"effort": "high"}
+    assert a["stream"] is True and b["stream"] is True
+    assert a["stream_options"] == b["stream_options"]
+    assert a["messages"] == b["messages"]
+    assert a["provider"]["allow_fallbacks"] is False
+    assert b["provider"]["allow_fallbacks"] is False
+    assert a["provider"]["only"] == ["z-ai"]
+    assert b["provider"]["only"] == ["gmicloud"]
+    skip = {"provider"}
+    for key in a:
+        if key in skip:
+            continue
+        assert a[key] == b[key]
+
+
+def test_attach_fail_mode_uses_shipped_fold():
+    from logic_trace import cot_fail_mode, load_hops_file
+
+    fixtures = ROOT / "tests" / "fixtures" / "hops"
+    short = load_hops_file(fixtures / "short-drop_resurrect.json")
+    late = load_hops_file(fixtures / "overthink-late_event_close.json")
+    row = _attach_fail_mode({"pass": True, "quality": "equivalent"}, short)
+    assert row["fail_mode"] == cot_fail_mode(passed=True, quality="equivalent", hops=short)
+    assert row["fail_mode"] == "pass"
+    row = _attach_fail_mode({"pass": False, "quality": "broken"}, late)
+    assert row["fail_mode"] == cot_fail_mode(passed=False, quality="broken", hops=late)
+    assert row["fail_mode"] == "overthink"
+    row = _attach_fail_mode({"pass": False, "quality": None}, [])
+    assert row["fail_mode"] == cot_fail_mode(passed=False, quality=None, hops=[])
+    assert row["fail_mode"] == "no_response"
 
 
 def test_cli_has_k_and_variance():

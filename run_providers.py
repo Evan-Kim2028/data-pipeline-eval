@@ -32,7 +32,7 @@ from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
 from contracts import SCHEMA_VERSION, ResponseArtifact, encode_json, environment_digest, git_revision
 from patches import apply_patch
 from prompt_bundle import all_bundles, bundle_for
-from logic_trace import attach_throughput, hops_from_reasoning
+from logic_trace import attach_throughput, cot_fail_mode, hops_from_reasoning, load_hops_file
 from quality import classify, tag_quality
 from sandbox import image_lock
 from trial_store import SpendEvent, TrialStore
@@ -200,6 +200,7 @@ TRIAL_ROW_KEYS = (
     "patch_s",
     "hop_count",
     "hops_path",
+    "fail_mode",
     "tps_out",
     "tps_total",
     "tps_reason",
@@ -311,14 +312,11 @@ def _tick(task: str, provider: str, t0: float, phase: str, reason_n: int, conten
     _out(line)
 
 
-def _complete(message: str, provider: str, *, task: str, require_parameters: bool = False) -> tuple[str, dict]:
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not key:
-        raise SystemExit("OPENROUTER_API_KEY is not set")
+def request_body(message: str, provider: str, *, require_parameters: bool = False) -> dict:
     provider_cfg: dict = {"only": [provider], "allow_fallbacks": False}
     if require_parameters:
         provider_cfg["require_parameters"] = True
-    body = {
+    return {
         "model": MODEL,
         "temperature": TEMPERATURE,
         "max_tokens": MAX_TOKENS,
@@ -326,13 +324,30 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
         "stream": True,
         "stream_options": {"include_usage": True},
         "provider": provider_cfg,
-        "messages": [
-            {
-                "role": "user",
-                "content": message,
-            }
-        ],
+        "messages": [{"role": "user", "content": message}],
     }
+
+
+def _attach_fail_mode(row: dict, hops: list[dict] | None = None) -> dict:
+    if hops is None:
+        hops = []
+        hop_path = row.get("hops_path")
+        if hop_path and Path(str(hop_path)).is_file():
+            hops = load_hops_file(Path(str(hop_path)))
+    quality = row.get("quality")
+    row["fail_mode"] = cot_fail_mode(
+        passed=bool(row.get("pass")),
+        quality=None if quality is None else str(quality),
+        hops=hops,
+    )
+    return row
+
+
+def _complete(message: str, provider: str, *, task: str, require_parameters: bool = False) -> tuple[str, dict]:
+    key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not key:
+        raise SystemExit("OPENROUTER_API_KEY is not set")
+    body = request_body(message, provider, require_parameters=require_parameters)
     req = urllib.request.Request(
         API,
         data=json.dumps(body).encode(),
@@ -572,11 +587,13 @@ def _run_pair(
     if over:
         row = _base_row(task, provider, trial, run_meta)
         row["error"] = "spend cap"
+        _attach_fail_mode(row, [])
         _record(run_meta, all_rows, spend, row)
         _out(f"FAIL {task:22} {provider:14} t{trial} spend cap")
         return row
     row = _base_row(task, provider, trial, run_meta)
     tmp = None
+    hops: list[dict] = []
     try:
         _out(f">> {task}  {provider}  t{trial}  seeding checkout")
         tmp = _seed_tree(task)
@@ -597,7 +614,6 @@ def _run_pair(
         if meta.get("cost"):
             with SPEND_LOCK:
                 spend[0] += float(meta["cost"])
-        hops: list[dict] = []
         raw_file = Path(str(meta.get("raw_path") or ""))
         if raw_file.is_file():
             payload = json.loads(raw_file.read_text())
@@ -662,6 +678,7 @@ def _run_pair(
     finally:
         if tmp is not None:
             shutil.rmtree(tmp.parent, ignore_errors=True)
+    _attach_fail_mode(row, hops)
     _record(run_meta, all_rows, spend, row)
     q = row.get("quality") or ""
     _out(

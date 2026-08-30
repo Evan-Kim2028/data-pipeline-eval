@@ -184,6 +184,8 @@ def cot_fail_mode(*, passed: bool, quality: str | None, hops: list[dict]) -> str
 def host_hop_rollup(rows: list[dict]) -> list[dict]:
     order: list[str] = []
     by: dict[str, list[dict]] = {}
+    cache_hits: dict[str, int] = {}
+    cache_obs: dict[str, int] = {}
     for row in rows:
         provider = str(row.get("provider") or "")
         if not provider:
@@ -191,7 +193,14 @@ def host_hop_rollup(rows: list[dict]) -> list[dict]:
         if provider not in by:
             by[provider] = []
             order.append(provider)
+            cache_hits[provider] = 0
+            cache_obs[provider] = 0
         by[provider].append(trial_hop_stats(row))
+        cached = row.get("cached_tokens")
+        if isinstance(cached, (int, float)):
+            cache_obs[provider] += 1
+            if cached > 0:
+                cache_hits[provider] += 1
     out: list[dict] = []
     for provider in order:
         trials = by[provider]
@@ -205,11 +214,15 @@ def host_hop_rollup(rows: list[dict]) -> list[dict]:
             use = cot if src is None else src
             return [float(t[key]) for t in use if isinstance(t.get(key), (int, float))]
 
+        n_cached = cache_hits.get(provider, 0)
+        n_obs = cache_obs.get(provider, 0)
         out.append(
             {
                 "provider": provider,
                 "n": len(trials),
                 "n_pass": sum(1 for t in trials if t.get("pass")),
+                "n_cached": n_cached,
+                "cached_share": (n_cached / n_obs) if n_obs else None,
                 "mean_hops": _mean(col("hop_count")),
                 "mean_chars_total": _mean(col("chars_total")),
                 "mean_chars_per_hop": _mean(col("chars_per_hop")),

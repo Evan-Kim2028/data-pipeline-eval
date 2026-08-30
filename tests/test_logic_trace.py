@@ -201,6 +201,7 @@ def test_write_observations_from_shipped_rollup(tmp_path):
                 "task": "drop_resurrect",
                 "provider": "gmicloud",
                 "pass": True,
+                "cached_tokens": 256,
                 "reasoning_tokens": 80,
                 "think_s": 8.0,
                 "latency_s": 10.0,
@@ -215,6 +216,7 @@ def test_write_observations_from_shipped_rollup(tmp_path):
                 "provider": "z-ai",
                 "pass": False,
                 "quality": "broken",
+                "cached_tokens": 0,
                 "reasoning_tokens": 20,
                 "think_s": 2.0,
                 "latency_s": 4.0,
@@ -252,7 +254,12 @@ def test_write_observations_from_shipped_rollup(tmp_path):
         assert "very_hard" in blob or "complexity" in blob.lower()
         assert "drop_resurrect" in blob
         assert "fail mode" in blob.lower() or "overthink" in blob or "apply_fail" in blob or "pass:" in blob
-        assert "no_response" in blob
+        assert "no_response" in blob or "no-reply" in blob
+        assert "short-wrong" in blob
+        assert "apply-fail" in blob
+        assert "overthink" in blob
+        assert "zero cached" in blob or "Prefix cache" in blob
+        assert "winner" not in blob.lower() or "no winner" in blob.lower()
         assert "<script type=\"module\"" not in blob
     by = {h["provider"]: h for h in hosts}
     assert by["gmicloud"]["mean_chars_per_hop"] == 40
