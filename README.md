@@ -1,17 +1,28 @@
 # data-pipeline-eval
 
-Public gym for data-pipeline incidents. Generic lakehouse, not a
-product dump. Names are directory ids. **Category** clusters them;
-**difficulty** is estimated (`docs/TAXONOMY.md`). Catalog:
-`harness/catalog.py`. Fifteen tasks.
+A public eval of data-pipeline bugs. Fifteen jobs in a generic
+lakehouse, each already broken. The model sees the incident and
+returns a unified diff. Pytest says whether the repair works.
 
-| Category | What the incident is about |
+This is not a product dump. Task names are directory ids. The
+catalog is `harness/catalog.py`.
+
+## Tasks
+
+Five kinds of incident. Difficulty is an estimate until a scored
+run publishes pass rates (`docs/TAXONOMY.md`).
+
+| Category | What breaks |
 |---|---|
 | `schema` | Guessed column types, a date sent as timestamptz, mixed ids in one load. |
 | `time` | Which clock the job uses for lookbacks and cutoffs. |
 | `incremental` | Cheap skip checks that still plan a full scan. |
 | `serving` | What readers or the next run treat as current or done. |
 | `concurrency` | Stale table handles. Optimistic-concurrency retry that does not re-read. |
+
+The list below is those categories, easy to very hard. `default` is
+the main set. `calibration` is two easier checks (`timestamptz_cutoff`,
+`utc_lookback`).
 
 | Task | Category | Difficulty | Suite |
 |---|---|---|---|
@@ -54,7 +65,9 @@ Each task fails on the broken files in `tasks/<id>/fault` and
 passes after the gold patch. `python verify.py --validate-catalog`
 only checks the catalog and task files.
 
-## Replicate
+## Running the eval
+
+Needs an OpenRouter key. `--spend` is required to call a host.
 
 ```sh
 export OPENROUTER_API_KEY=sk-or-...   # or a one-line .env
