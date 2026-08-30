@@ -15,6 +15,7 @@ from run_providers import (
     grade_env,
     print_campaign_plan,
     request_body,
+    trial_pairs,
     usage_from_openrouter,
 )
 
@@ -120,6 +121,16 @@ def test_trial_row_keys_frozen():
         "cached_tokens",
     }
     assert required <= set(TRIAL_ROW_KEYS)
+
+
+def test_trial_pairs_interleave_hosts():
+    hosts = ["z-ai", "novita", "deepinfra", "gmicloud"]
+    pairs = trial_pairs(("watermark_poison", "entity_reload"), hosts, 100)
+    assert len(pairs) == 800
+    first = [p for _, p, _ in pairs[:8]]
+    assert set(first) == set(hosts)
+    assert first[:4] == hosts
+    assert [p for _, p, _ in pairs[4:8]] == hosts
 
 
 def test_request_body_hosts_match_except_provider_only():

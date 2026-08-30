@@ -312,6 +312,10 @@ def _tick(task: str, provider: str, t0: float, phase: str, reason_n: int, conten
     _out(line)
 
 
+def trial_pairs(tasks: tuple[str, ...] | list[str], providers: list[str], k: int) -> list[tuple[str, str, int]]:
+    return [(t, p, trial) for t in tasks for trial in range(1, k + 1) for p in providers]
+
+
 def request_body(message: str, provider: str, *, require_parameters: bool = False) -> dict:
     provider_cfg: dict = {"only": [provider], "allow_fallbacks": False}
     if require_parameters:
@@ -1075,7 +1079,7 @@ def main() -> int:
         providers = ["z-ai", "novita"]
     else:
         providers = [p.strip() for p in args.providers.split(",") if p.strip()]
-    pairs = [(t, p, trial) for t in tasks for p in providers for trial in range(1, args.k + 1)]
+    pairs = trial_pairs(tasks, providers, args.k)
     jobs = args.jobs if args.jobs > 0 else min(DEFAULT_JOBS, max(1, len(pairs)))
     spend = [0.0]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
