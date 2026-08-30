@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Observations: GMI Cloud think time</title>
+<style>
+body{font:16px/1.45 system-ui,sans-serif;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#111;}table{border-collapse:collapse;width:100%;font-size:13px;margin:1rem 0;}th,td{border:1px solid #ccc;padding:4px 6px;text-align:left;}th{background:#f3f3f3;}</style>
+</head>
+<body>
+
+<h1>Observations: GMI Cloud think time vs hop traces</h1>
+<p>Run <code>20260830T000722Z</code>. One-shot CoT. Hops are paragraph/claim cuts of the reasoning blob,
+not tool-call spans and not an agent loop. No winner rank.</p>
+<p>GMI Cloud mean think_s is 17.1s (rank 2 of 4). Mean hops 12.0 (rank 2). Mean chars/hop 231 (rank 2). Mean reasoning_tokens 694 (rank 2). Mean tokens/hop 52 (rank 3). Longer think is not more hops. deepinfra has more mean hops (14.1 vs 12.0). GMI’s extra wall time lines up with think_s and reasoning_tokens, not with a uniquely high hop count.</p>
+<h2>Host hop size</h2>
+<table>
+<tr><th>provider</th><th>n</th><th>pass</th><th>mean hops</th><th>mean chars/hop</th><th>mean chars</th><th>mean reason_tok</th><th>mean tokens/hop</th><th>mean think_s</th><th>reason tok / think_s</th><th>mean latency_s</th></tr>
+<tr><td>deepinfra</td><td>27</td><td>14/27</td><td>14.1</td><td>215</td><td>3498</td><td>897</td><td>55</td><td>17.6</td><td>52.8</td><td>30.9</td></tr><tr><td>gmicloud</td><td>27</td><td>15/27</td><td>12.0</td><td>231</td><td>3104</td><td>694</td><td>52</td><td>17.1</td><td>50.1</td><td>32.7</td></tr><tr><td>novita</td><td>27</td><td>13/27</td><td>7.6</td><td>243</td><td>2081</td><td>500</td><td>55</td><td>12.8</td><td>42.7</td><td>30.5</td></tr><tr><td>z-ai</td><td>27</td><td>15/27</td><td>11.6</td><td>212</td><td>2955</td><td>656</td><td>48</td><td>14.8</td><td>42.5</td><td>28.4</td></tr>
+</table>
+<h2>How to read this</h2>
+<p>More hops means the CoT broke into more claim/paragraph units. Longer hops means each unit is bigger.
+Tokens per hop is reasoning_tokens / hop_count. Think_s is stream time spent in the reasoning phase.</p>
+<p>See <a href="../2/FINDINGS.html">Findings 2</a> for pass/quality and TPS on the same rows.
+Findings 1 had GMI mean latency 58.7s and mean reason_tok 2033. This hop-traced run does not repeat that gap.
+GMI still has the highest latency here, but mean think_s sits next to deepinfra.</p>
+
+</body>
+</html>
