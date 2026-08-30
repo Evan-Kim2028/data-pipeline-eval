@@ -1,13 +1,12 @@
 # data-pipeline-eval
 
-A data pipeline is a job that reads files and writes tables on a
-schedule. I run one of those systems. Models I tried kept missing
-the same repairs, so I turned those failures into a public eval.
+I run a lakehouse. Models I tried kept missing the same pipeline
+repairs, so I turned those failures into a public eval.
 
-Each task is a broken job. The model reads the incident writeup
-and answers with a patch, a unified diff of lines to delete and
-lines to add. Tests decide whether the repair works. The warehouse
-in this repo is generic. The bugs are ones I have seen.
+Each task is a broken scheduled job. It reads files and writes
+tables. The model reads the incident and answers with a unified
+diff. Tests decide whether the repair works. The warehouse is
+generic. I have hit these bugs at work.
 
 ## The fifteen tasks
 
@@ -17,8 +16,8 @@ in this repo is generic. The bugs are ones I have seen.
 
 Start with `timestamptz_cutoff`. The cutoff is a Python `date`.
 The column is a timestamp with a time zone. The broken code
-returns `cutoff.isoformat()`, which is the string `2026-07-13`,
-and the binder rejects it. Read these four files in order:
+returns `cutoff.isoformat()`, the string `2026-07-13`, and the
+job raises. Read these four files in order:
 
 1. `tasks/timestamptz_cutoff/prompt.txt`
 2. `tasks/timestamptz_cutoff/fault/warehouse/sidecar/cutoff.py`
@@ -26,20 +25,18 @@ and the binder rejects it. Read these four files in order:
 4. `docs/solutions/timestamptz_cutoff.md`
 
 The other fourteen tasks use the same four-file shape. A second
-test suite under `tasks/<id>/tests_adjudication` is written to
-fail a patch that only fixes the happy path. Official prompts
-include the incident and the production files. Gold code lives
-in `warehouse/`.
-
-The kinds of break are the ones I keep seeing.
+test suite under `tasks/<id>/tests_adjudication` fails a patch
+that only fixes the happy path. Official prompts include the
+incident and the production files. Gold code lives in
+`warehouse/`.
 
 | Kind | What breaks |
 |---|---|
-| `schema` | The job guessed the wrong type for a column. |
-| `time` | The job used the wrong clock. |
-| `incremental` | The job thought it could skip work and still scanned everything. |
-| `serving` | The next reader, or the next run, treated the wrong thing as current. |
-| `concurrency` | Two writers. A retry reused a stale table handle. |
+| `schema` | Wrong type on a column. |
+| `time` | Wrong clock. |
+| `incremental` | A skip check that still scanned everything. |
+| `serving` | The next reader treated the wrong thing as current. |
+| `concurrency` | A retry reused a stale table handle. |
 
 Tasks are grouped by that kind and ordered from easy to very
 hard. `calibration` is two warm-ups. `default` is the other
