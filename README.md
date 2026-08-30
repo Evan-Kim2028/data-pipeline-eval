@@ -1,14 +1,13 @@
 # data-pipeline-eval
 
-This repository is a public eval of fifteen broken lakehouse jobs.
-I wrote it after watching models miss pipeline repairs in a
-lakehouse I run. The warehouse here is generic. The failure modes
-are ones I have seen: inferred types, the wrong clock, a skip
-check that still plans a full scan, a reader that treats the
-wrong file as current, and a retry that reuses a stale handle.
+A data pipeline is a job that reads files and writes tables on a
+schedule. I run one of those systems. Models I tried kept missing
+the same repairs, so I turned those failures into a public eval.
 
-The model reads the incident text and writes a unified diff.
-Pytest grades the repair.
+Each task is a broken job. The model reads the incident writeup
+and answers with a patch, a unified diff of lines to delete and
+lines to add. Tests decide whether the repair works. The warehouse
+in this repo is generic. The bugs are ones I have seen.
 
 ## The fifteen tasks
 
@@ -16,22 +15,35 @@ Pytest grades the repair.
 >
 > The job never started the scan. Sidecar is behind.
 
-`timestamptz_cutoff` is the easy example. The other fourteen tasks
-follow the same shape. Each one is a real incident, a small edit,
-and a second test suite that fails an almost-right patch.
+Start with `timestamptz_cutoff`. The cutoff is a Python `date`.
+The column is a timestamp with a time zone. The broken code
+returns `cutoff.isoformat()`, which is the string `2026-07-13`,
+and the binder rejects it. Read these four files in order:
 
-Tasks are grouped by kind of incident and ordered from easy to
-very hard. The `calibration` suite is two warm-up tasks. The
-`default` suite is the other thirteen. Difficulty is an estimate.
-See `docs/TAXONOMY.md`.
+1. `tasks/timestamptz_cutoff/prompt.txt`
+2. `tasks/timestamptz_cutoff/fault/warehouse/sidecar/cutoff.py`
+3. `tasks/timestamptz_cutoff/tests/test_scan.py`
+4. `docs/solutions/timestamptz_cutoff.md`
+
+The other fourteen tasks use the same four-file shape. A second
+test suite under `tasks/<id>/tests_adjudication` is written to
+fail a patch that only fixes the happy path. Official prompts
+include the incident and the production files. Gold code lives
+in `warehouse/`.
+
+The kinds of break are the ones I keep seeing.
 
 | Kind | What breaks |
 |---|---|
-| `schema` | Guessed types. A date sent as timestamptz. Mixed ids in one load. |
+| `schema` | The job guessed the wrong type for a column. |
 | `time` | The job used the wrong clock. |
-| `incremental` | A cheap skip check that still plans a full scan. |
-| `serving` | Readers, or the next run, treat the wrong thing as current. |
-| `concurrency` | A stale table handle. A retry that reuses it. |
+| `incremental` | The job thought it could skip work and still scanned everything. |
+| `serving` | The next reader, or the next run, treated the wrong thing as current. |
+| `concurrency` | Two writers. A retry reused a stale table handle. |
+
+Tasks are grouped by that kind and ordered from easy to very
+hard. `calibration` is two warm-ups. `default` is the other
+thirteen. Difficulty is an estimate. See `docs/TAXONOMY.md`.
 
 | Task | Kind | Difficulty | Suite |
 |---|---|---|---|
@@ -50,12 +62,6 @@ See `docs/TAXONOMY.md`.
 | `mtime_skip` | serving | very_hard | default |
 | `drop_resurrect` | serving | very_hard | default |
 | `occ_retry` | concurrency | hard | default |
-
-Practice tests live in `tasks/<id>/tests`. A second suite lives in
-`tasks/<id>/tests_adjudication`. Both directories are public and
-both run at grade time. Official prompts include the incident and
-production files. Gold code lives in `warehouse/`. Prose writeups
-live in `docs/solutions/`.
 
 ## Try it
 
