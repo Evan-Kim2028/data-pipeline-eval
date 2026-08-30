@@ -10,6 +10,8 @@ wrong file as current, and a retry that reuses a stale handle.
 The model reads the incident text and writes a unified diff.
 Pytest grades the repair.
 
+## The fifteen tasks
+
 > ValueError: Invalid timestamp with zone: 2026-07-13
 >
 > The job never started the scan. Sidecar is behind.
@@ -17,6 +19,43 @@ Pytest grades the repair.
 `timestamptz_cutoff` is the easy example. The other fourteen tasks
 follow the same shape. Each one is a real incident, a small edit,
 and a second test suite that fails an almost-right patch.
+
+Tasks are grouped by kind of incident and ordered from easy to
+very hard. The `calibration` suite is two warm-up tasks. The
+`default` suite is the other thirteen. Difficulty is an estimate.
+See `docs/TAXONOMY.md`.
+
+| Kind | What breaks |
+|---|---|
+| `schema` | Guessed types. A date sent as timestamptz. Mixed ids in one load. |
+| `time` | The job used the wrong clock. |
+| `incremental` | A cheap skip check that still plans a full scan. |
+| `serving` | Readers, or the next run, treat the wrong thing as current. |
+| `concurrency` | A stale table handle. A retry that reuses it. |
+
+| Task | Kind | Difficulty | Suite |
+|---|---|---|---|
+| `timestamptz_cutoff` | schema | easy | calibration |
+| `schema_infer` | schema | med | default |
+| `field_readd` | schema | very_hard | default |
+| `utc_lookback` | time | med | calibration |
+| `late_event_close` | time | very_hard | default |
+| `unique_probe` | incremental | hard | default |
+| `entity_reload` | incremental | very_hard | default |
+| `frozen_basis` | incremental | very_hard | default |
+| `read_write_split` | incremental | very_hard | default |
+| `rebuild_wipe` | incremental | very_hard | default |
+| `latest_pointer` | serving | hard | default |
+| `watermark_poison` | serving | very_hard | default |
+| `mtime_skip` | serving | very_hard | default |
+| `drop_resurrect` | serving | very_hard | default |
+| `occ_retry` | concurrency | hard | default |
+
+Practice tests live in `tasks/<id>/tests`. A second suite lives in
+`tasks/<id>/tests_adjudication`. Both directories are public and
+both run at grade time. Official prompts include the incident and
+production files. Gold code lives in `warehouse/`. Prose writeups
+live in `docs/solutions/`.
 
 ## Try it
 
@@ -58,42 +97,3 @@ Each run writes `logs/runs/<id>.jsonl`. Resume an incomplete run
 with `--spend --continue-run <id>`. Build tables with
 `python scripts/write_findings.py <jsonl> --out <dir>`. The request
 lock is `docs/HARNESS.md`. The catalog is `harness/catalog.py`.
-
-## The fifteen tasks
-
-Tasks are grouped by kind of incident and ordered from easy to
-very hard. The `calibration` suite is two warm-up tasks. The
-`default` suite is the other thirteen. Difficulty is an estimate.
-See `docs/TAXONOMY.md`.
-
-| Kind | What breaks |
-|---|---|
-| `schema` | Guessed types. A date sent as timestamptz. Mixed ids in one load. |
-| `time` | The job used the wrong clock. |
-| `incremental` | A cheap skip check that still plans a full scan. |
-| `serving` | Readers, or the next run, treat the wrong thing as current. |
-| `concurrency` | A stale table handle. A retry that reuses it. |
-
-| Task | Kind | Difficulty | Suite |
-|---|---|---|---|
-| `timestamptz_cutoff` | schema | easy | calibration |
-| `schema_infer` | schema | med | default |
-| `field_readd` | schema | very_hard | default |
-| `utc_lookback` | time | med | calibration |
-| `late_event_close` | time | very_hard | default |
-| `unique_probe` | incremental | hard | default |
-| `entity_reload` | incremental | very_hard | default |
-| `frozen_basis` | incremental | very_hard | default |
-| `read_write_split` | incremental | very_hard | default |
-| `rebuild_wipe` | incremental | very_hard | default |
-| `latest_pointer` | serving | hard | default |
-| `watermark_poison` | serving | very_hard | default |
-| `mtime_skip` | serving | very_hard | default |
-| `drop_resurrect` | serving | very_hard | default |
-| `occ_retry` | concurrency | hard | default |
-
-Practice tests live in `tasks/<id>/tests`. A second suite lives in
-`tasks/<id>/tests_adjudication`. Both directories are public and
-both run at grade time. Official prompts include the incident and
-production files. Gold code lives in `warehouse/`. Prose writeups
-live in `docs/solutions/`.
