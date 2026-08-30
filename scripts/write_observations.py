@@ -154,8 +154,10 @@ def _fail_mode_read(hosts: list[dict], tasks: list[dict]) -> str:
         over = int(modes.get("overthink") or 0)
         apply_n = int(modes.get("apply_fail") or 0)
         short = int(modes.get("short_wrong") or 0)
+        none = int(modes.get("no_response") or 0)
+        extra = f" no_response {none}" if none else ""
         host_bits.append(
-            f"{h['provider']} overthink {over} apply_fail {apply_n} short_wrong {short}"
+            f"{h['provider']} overthink {over} apply_fail {apply_n} short_wrong {short}{extra}"
         )
     return (
         "Fail modes are a fold over hop lists plus trial quality. "
@@ -167,6 +169,7 @@ def _fail_mode_read(hosts: list[dict], tasks: list[dict]) -> str:
         "`apply_fail` is a unified diff that did not apply. "
         "`overthink` is a fail with hop_count ≥ 8 or the same first-six-word stem on ≥ 3 hops. "
         "`short_wrong` is a fail with a short CoT that still missed the grade. "
+        "`no_response` is a trial with no quality tag and no hops (HTTP 429 or stream drop), not a short CoT miss. "
         + "; ".join(host_bits)
         + "."
     )

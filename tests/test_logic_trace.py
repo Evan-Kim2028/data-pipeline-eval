@@ -9,6 +9,7 @@ from logic_trace import (
     load_hops_file,
     restated_diagnosis,
     task_hop_rollup,
+    trial_hop_stats,
 )
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "hops"
@@ -149,6 +150,40 @@ def test_cot_fail_mode_from_committed_hop_fixtures():
     assert restated_diagnosis(short) is False
 
 
+def test_cot_fail_mode_empty_hops_quality_none_is_no_response():
+    assert cot_fail_mode(passed=False, quality=None, hops=[]) == "no_response"
+    assert cot_fail_mode(passed=False, quality="", hops=[]) == "no_response"
+    stats = trial_hop_stats({"pass": False, "quality": None, "hops": []})
+    assert stats["fail_mode"] == "no_response"
+    assert stats["hop_count"] == 0
+    assert cot_fail_mode(passed=False, quality="broken", hops=[]) == "short_wrong"
+    assert cot_fail_mode(passed=False, quality="held_fail", hops=[]) == "short_wrong"
+    rows = [
+        {
+            "provider": "novita",
+            "task": "watermark_poison",
+            "pass": False,
+            "quality": None,
+            "hops": [],
+        },
+        {
+            "provider": "novita",
+            "task": "watermark_poison",
+            "pass": False,
+            "quality": "broken",
+            "hops": [{"chars": 20, "text": "a" * 20}],
+        },
+    ]
+    host = {h["provider"]: h for h in host_hop_rollup(rows)}["novita"]
+    assert host["fail_modes"]["no_response"] == 1
+    assert host["fail_modes"]["short_wrong"] == 1
+    assert host["mean_hops"] == 1
+    tasks = {t["task"]: t for t in task_hop_rollup(rows)}
+    assert tasks["watermark_poison"]["fail_modes"]["no_response"] == 1
+    assert tasks["watermark_poison"]["fail_modes"]["short_wrong"] == 1
+    assert tasks["watermark_poison"]["mean_hops_fail"] == 1
+
+
 def test_write_observations_from_shipped_rollup(tmp_path):
     import importlib.util
     import json
@@ -179,10 +214,22 @@ def test_write_observations_from_shipped_rollup(tmp_path):
                 "task": "drop_resurrect",
                 "provider": "z-ai",
                 "pass": False,
+                "quality": "broken",
                 "reasoning_tokens": 20,
                 "think_s": 2.0,
                 "latency_s": 4.0,
                 "hops_path": str(hops_path),
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "run_id": "OBS1",
+                "task": "watermark_poison",
+                "provider": "novita",
+                "pass": False,
+                "quality": None,
+                "hops": [],
             }
         )
         + "\n"
@@ -205,6 +252,7 @@ def test_write_observations_from_shipped_rollup(tmp_path):
         assert "very_hard" in blob or "complexity" in blob.lower()
         assert "drop_resurrect" in blob
         assert "fail mode" in blob.lower() or "overthink" in blob or "apply_fail" in blob or "pass:" in blob
+        assert "no_response" in blob
         assert "<script type=\"module\"" not in blob
     by = {h["provider"]: h for h in hosts}
     assert by["gmicloud"]["mean_chars_per_hop"] == 40

@@ -22,8 +22,10 @@ SHA-256 digests. Changing that sentence is a new prompt campaign.
 
 Hop-trace fail modes (`logic_trace.cot_fail_mode`) fold hop lists plus
 trial quality: `pass`, `apply_fail`, `overthink` (hop_count ≥ 8 or the
-same first-six-word stem on ≥ 3 hops), `short_wrong`. Gold solution
-text is not a classifier input.
+same first-six-word stem on ≥ 3 hops), `short_wrong`, `no_response`
+(no quality tag and no hops — HTTP 429 or stream drop). Gold solution
+text is not a classifier input. `no_response` trials stay in n and
+fail-mode counts; hop and think means skip them.
 
 Bake-off apply unwraps markdown fences and prefers a diff/patch
 fence or a body that starts with `diff --git` / `--- a/`. A leading

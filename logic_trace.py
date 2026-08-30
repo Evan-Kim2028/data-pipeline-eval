@@ -169,9 +169,11 @@ def restated_diagnosis(hops: list[dict]) -> bool:
 
 
 def cot_fail_mode(*, passed: bool, quality: str | None, hops: list[dict]) -> str:
-    q = str(quality or "")
+    q = str(quality or "").strip()
     if passed:
         return "pass"
+    if not q and not hops:
+        return "no_response"
     if q.startswith("patch_did_not") or q.startswith("invalid_patch"):
         return "apply_fail"
     if len(hops) >= OVERTHINK_HOPS or restated_diagnosis(hops):
@@ -193,12 +195,16 @@ def host_hop_rollup(rows: list[dict]) -> list[dict]:
     out: list[dict] = []
     for provider in order:
         trials = by[provider]
-        def col(key: str) -> list[float]:
-            return [float(t[key]) for t in trials if isinstance(t.get(key), (int, float))]
         fail_modes: dict[str, int] = {}
         for t in trials:
             mode = str(t.get("fail_mode") or "")
             fail_modes[mode] = fail_modes.get(mode, 0) + 1
+        cot = [t for t in trials if t.get("fail_mode") != "no_response"]
+
+        def col(key: str, src: list[dict] | None = None) -> list[float]:
+            use = cot if src is None else src
+            return [float(t[key]) for t in use if isinstance(t.get(key), (int, float))]
+
         out.append(
             {
                 "provider": provider,
@@ -240,10 +246,11 @@ def task_hop_rollup(rows: list[dict], *, difficulty_of: dict[str, str] | None = 
         for t in trials:
             q = str(t.get("quality") or "")
             qualities[q] = qualities.get(q, 0) + 1
-        pass_h = [float(t["hop_count"]) for t in trials if t.get("pass")]
-        fail_h = [float(t["hop_count"]) for t in trials if not t.get("pass")]
-        pass_th = [float(t["think_s"]) for t in trials if t.get("pass") and isinstance(t.get("think_s"), (int, float))]
-        fail_th = [float(t["think_s"]) for t in trials if not t.get("pass") and isinstance(t.get("think_s"), (int, float))]
+        cot = [t for t in trials if t.get("fail_mode") != "no_response"]
+        pass_h = [float(t["hop_count"]) for t in cot if t.get("pass")]
+        fail_h = [float(t["hop_count"]) for t in cot if not t.get("pass")]
+        pass_th = [float(t["think_s"]) for t in cot if t.get("pass") and isinstance(t.get("think_s"), (int, float))]
+        fail_th = [float(t["think_s"]) for t in cot if not t.get("pass") and isinstance(t.get("think_s"), (int, float))]
         rate = n_pass / n if n else 0.0
         if rate >= 0.9:
             band = "solved"
@@ -274,11 +281,11 @@ def task_hop_rollup(rows: list[dict], *, difficulty_of: dict[str, str] | None = 
                 "qualities": qualities,
                 "apply_fail": apply_fail,
                 "fail_modes": fail_modes,
-                "mean_hops": _mean([float(t["hop_count"]) for t in trials]),
+                "mean_hops": _mean([float(t["hop_count"]) for t in cot]),
                 "mean_hops_pass": _mean(pass_h),
                 "mean_hops_fail": _mean(fail_h),
                 "mean_think_s": _mean(
-                    [float(t["think_s"]) for t in trials if isinstance(t.get("think_s"), (int, float))]
+                    [float(t["think_s"]) for t in cot if isinstance(t.get("think_s"), (int, float))]
                 ),
                 "mean_think_s_pass": _mean(pass_th),
                 "mean_think_s_fail": _mean(fail_th),
