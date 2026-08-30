@@ -27,15 +27,15 @@ from pathlib import Path
 
 from dataclasses import asdict
 
-from campaign_plan import Campaign, CampaignError, expand, load_campaign
-from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
-from contracts import SCHEMA_VERSION, ResponseArtifact, encode_json, environment_digest, git_revision
-from patches import apply_patch
-from prompt_bundle import all_bundles, bundle_for
-from logic_trace import attach_throughput, cot_fail_mode, hops_from_reasoning, load_hops_file
-from quality import classify, tag_quality
-from sandbox import image_lock
-from trial_store import SpendEvent, TrialStore
+from harness.campaign_plan import Campaign, CampaignError, expand, load_campaign
+from harness.catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
+from harness.contracts import SCHEMA_VERSION, ResponseArtifact, encode_json, environment_digest, git_revision
+from harness.patches import apply_patch
+from harness.prompt_bundle import all_bundles, bundle_for
+from harness.logic_trace import attach_throughput, cot_fail_mode, hops_from_reasoning, load_hops_file
+from harness.quality import classify, tag_quality
+from harness.sandbox import image_lock
+from harness.trial_store import SpendEvent, TrialStore
 
 ROOT = Path(__file__).resolve().parent
 

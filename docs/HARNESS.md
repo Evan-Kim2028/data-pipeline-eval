@@ -12,7 +12,7 @@ Model slug `z-ai/glm-5.3-flash`. Thinking cannot be disabled.
 | `allow_fallbacks` | `false` | Same. |
 | `require_parameters` | `true` | Official campaigns. |
 
-Official candidate messages come from `prompt_bundle.py`: incident,
+Official candidate messages come from `harness/prompt_bundle.py`: incident,
 entrypoint, editable paths, instructions, and faulted production
 context. Tests and answers stay in the clone and never enter that
 message. Shared instructions ask for one reasoning claim, then the

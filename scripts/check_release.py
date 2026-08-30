@@ -13,13 +13,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from catalog import all_ids  # noqa: E402
-from prompt_bundle import all_bundles  # noqa: E402
+from harness.catalog import all_ids  # noqa: E402
+from harness.prompt_bundle import all_bundles  # noqa: E402
 
 
 def _stdlib_only(path: Path) -> bool:
     tree = ast.parse(path.read_text())
-    allowed = {"report_stats"}
+    allowed = {"harness", "report_stats"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -54,8 +54,8 @@ def main() -> int:
             errors.append(f"prompt leak in {task_id}")
     if not _stdlib_only(ROOT / "report.py"):
         errors.append("report.py is not standard-library-only")
-    if not _stdlib_only(ROOT / "report_stats.py"):
-        errors.append("report_stats.py is not standard-library-only")
+    if not _stdlib_only(ROOT / "harness" / "report_stats.py"):
+        errors.append("harness/report_stats.py is not standard-library-only")
     if args.manifest.is_file():
         man = json.loads(args.manifest.read_text())
         if list(man.get("task_ids") or []) != list(ids):

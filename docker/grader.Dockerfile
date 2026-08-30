@@ -10,7 +10,8 @@ RUN apt-get update \
     && useradd --create-home --uid 1000 grader \
     && mkdir -p /in /work \
     && chown 1000:1000 /in /work
-COPY requirements.lock .python-version contracts.py catalog.py checkouts.py patches.py grader.py docker/entrypoint.sh ./
+COPY requirements.lock .python-version docker/entrypoint.sh ./
+COPY harness/ /grader/harness/
 RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock \
     && chmod 755 /grader/entrypoint.sh
 USER 1000:1000

@@ -14,11 +14,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from catalog import all_ids, spec
-from checkouts import materialize, write_checkout
-from grader import collect_node_ids, run_pytest
-from patches import apply_patch, gold_unified_diff
-from prompt_bundle import bundle_for
+from harness.catalog import all_ids, spec
+from harness.checkouts import materialize, write_checkout
+from harness.grader import collect_node_ids, run_pytest
+from harness.patches import apply_patch, gold_unified_diff
+from harness.prompt_bundle import bundle_for
 
 
 def _seed(task_id: str) -> Path:

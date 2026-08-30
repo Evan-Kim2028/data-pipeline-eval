@@ -10,7 +10,7 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / "docker" / "grader-image.json"
 LIMITS = {
     "memory": "256m",

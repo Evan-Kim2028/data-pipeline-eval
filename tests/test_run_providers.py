@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from campaign_plan import expand, load_campaign
+from harness.campaign_plan import expand, load_campaign
 from run_providers import (
     TRIAL_ROW_KEYS,
     HostBreaker,
@@ -203,7 +203,7 @@ def test_request_body_hosts_match_except_provider_only():
 
 
 def test_attach_fail_mode_uses_shipped_fold():
-    from logic_trace import cot_fail_mode, load_hops_file
+    from harness.logic_trace import cot_fail_mode, load_hops_file
 
     fixtures = ROOT / "tests" / "fixtures" / "hops"
     short = load_hops_file(fixtures / "short-drop_resurrect.json")

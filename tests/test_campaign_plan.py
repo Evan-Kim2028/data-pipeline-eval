@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from campaign_plan import (
+from harness.campaign_plan import (
     ORDER_RULE,
     CampaignError,
     expand,
@@ -70,16 +70,16 @@ def test_starting_provider_rotates_by_catalog_index_plus_replicate():
     infer_r1 = [row for row in specs if row.task_id == "schema_infer" and row.replicate == 1]
     lookback_r0 = [row for row in specs if row.task_id == "utc_lookback" and row.replicate == 0]
     lookback_r1 = [row for row in specs if row.task_id == "utc_lookback" and row.replicate == 1]
-    assert [row.requested_provider for row in infer_r0] == ["z-ai", "novita"]
-    assert [row.requested_provider for row in infer_r1] == ["novita", "z-ai"]
-    assert [row.requested_provider for row in lookback_r0] == ["z-ai", "novita"]
-    assert [row.requested_provider for row in lookback_r1] == ["novita", "z-ai"]
+    assert [row.requested_provider for row in infer_r0] == ["novita", "z-ai"]
+    assert [row.requested_provider for row in infer_r1] == ["z-ai", "novita"]
+    assert [row.requested_provider for row in lookback_r0] == ["novita", "z-ai"]
+    assert [row.requested_provider for row in lookback_r1] == ["z-ai", "novita"]
     assert infer_r0[0].seed == 1 and infer_r1[0].seed == 2
     assert lookback_r0[0].suite == "calibration"
     assert infer_r0[0].suite == "default"
     assert infer_r0[0].order_position == 0
     assert by_id["schema_infer", 0, 0].trial_id == trial_id(
-        campaign_id="mini", task_id="schema_infer", replicate=0, provider="z-ai"
+        campaign_id="mini", task_id="schema_infer", replicate=0, provider="novita"
     )
 
 
@@ -104,9 +104,9 @@ def test_rotation_uses_catalog_index_not_manifest_order(tmp_path: Path):
     lookback_r0 = [row for row in specs if row.task_id == "utc_lookback" and row.replicate == 0]
     assert lookback_r0[0].order_position == 0
     assert infer_r0[0].order_position == 4
-    assert [row.requested_provider for row in infer_r0] == ["z-ai", "novita"]
-    assert [row.requested_provider for row in infer_r1] == ["novita", "z-ai"]
-    assert lookback_r0[0].requested_provider == "z-ai"
+    assert [row.requested_provider for row in infer_r0] == ["novita", "z-ai"]
+    assert [row.requested_provider for row in infer_r1] == ["z-ai", "novita"]
+    assert lookback_r0[0].requested_provider == "novita"
 
 
 def test_three_providers_rotate_from_catalog_index(tmp_path: Path):
@@ -131,8 +131,8 @@ def test_three_providers_rotate_from_catalog_index(tmp_path: Path):
     specs = expand(load_campaign(path))
     infer = [row for row in specs if row.task_id == "schema_infer"]
     probe = [row for row in specs if row.task_id == "unique_probe"]
-    assert [row.requested_provider for row in infer] == ["z-ai", "novita", "together"]
-    assert [row.requested_provider for row in probe] == ["novita", "together", "z-ai"]
+    assert [row.requested_provider for row in infer] == ["novita", "together", "z-ai"]
+    assert [row.requested_provider for row in probe] == ["together", "z-ai", "novita"]
     assert {row.seed for row in specs} == {7}
     assert {row.prompt_hash for row in infer} == {
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

@@ -4,9 +4,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from catalog import spec
-from checkouts import materialize, write_checkout
-from quality import classify, tag_quality
+from harness.catalog import spec
+from harness.checkouts import materialize, write_checkout
+from harness.quality import classify, tag_quality
 
 ROOT = Path(__file__).resolve().parents[1]
 

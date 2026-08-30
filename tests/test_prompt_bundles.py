@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from catalog import TASKS, all_ids
-from prompt_bundle import SHARED_INSTRUCTIONS, all_bundles, bundle_for
+from harness.catalog import TASKS, all_ids
+from harness.prompt_bundle import SHARED_INSTRUCTIONS, all_bundles, bundle_for
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "tests" / "snapshots" / "prompt-sha256.json"

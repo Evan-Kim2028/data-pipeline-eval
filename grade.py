@@ -13,15 +13,15 @@ import time
 from io import BytesIO
 from pathlib import Path
 
-from catalog import spec
-from checkouts import materialize, write_checkout
-from contracts import (
+from harness.catalog import spec
+from harness.checkouts import materialize, write_checkout
+from harness.contracts import (
     SCHEMA_VERSION,
     GradeReport,
     encode_json,
     environment_digest,
 )
-from sandbox import image_lock, run_container
+from harness.sandbox import image_lock, run_container
 
 ROOT = Path(__file__).resolve().parent
 _PROXY = (
@@ -154,7 +154,7 @@ def main() -> int:
         benchmark_repo_sha=artifact["benchmark_repo_sha"],
         grader_source_sha=artifact["grader_source_sha"],
         grader_image_digest=lock["digest"],
-        command=("python", "/grader/grader.py"),
+        command=("python", "-m", "harness.grader"),
         exit_code=result["exit_code"],
         tests_collected=collected,
         tests_failed=failed,

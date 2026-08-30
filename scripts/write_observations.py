@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from catalog import by_id
-from logic_trace import host_hop_rollup, task_hop_rollup
+from harness.catalog import by_id
+from harness.logic_trace import host_hop_rollup, task_hop_rollup
 
 STANDOUT_REL = 0.20
 GLOSSARY = (

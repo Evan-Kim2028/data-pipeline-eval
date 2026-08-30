@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from logic_trace import (
+from harness.logic_trace import (
     attach_throughput,
     cot_fail_mode,
     hop_size_stats,

@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-import report_stats
+from harness import report_stats
 
 
 def _load_jsonl(path: Path) -> list[dict]:

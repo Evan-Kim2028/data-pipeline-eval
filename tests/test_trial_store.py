@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from campaign_plan import TrialSpec, expand, load_campaign, manifest_hash
-from trial_store import SpendEvent, TrialStore, TrialStoreError
+from harness.campaign_plan import TrialSpec, expand, load_campaign, manifest_hash
+from harness.trial_store import SpendEvent, TrialStore, TrialStoreError
 
 ROOT = Path(__file__).resolve().parents[1]
 MINI = ROOT / "tests" / "fixtures" / "campaigns" / "mini.json"

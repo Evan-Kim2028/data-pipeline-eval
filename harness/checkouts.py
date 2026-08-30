@@ -7,7 +7,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from contracts import ContractError, TaskCheckout, TaskSpec, git_revision
+from .contracts import ContractError, TaskCheckout, TaskSpec, git_revision
 
 
 def _hash_bytes(data: bytes) -> str:

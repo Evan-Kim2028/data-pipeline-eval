@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from catalog import all_ids, spec
-from contracts import CampaignManifest, ContractError, encode_json
+from .catalog import all_ids, spec
+from .contracts import CampaignManifest, ContractError, encode_json
 
 ORDER_RULE = "catalog_index_plus_replicate"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")

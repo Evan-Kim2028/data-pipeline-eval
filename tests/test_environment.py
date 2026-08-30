@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from contracts import environment_digest, python_version_pin
+from harness.contracts import environment_digest, python_version_pin
 
 ROOT = Path(__file__).resolve().parents[1]
 

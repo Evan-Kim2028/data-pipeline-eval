@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from campaign_plan import TrialSpec
-from contracts import SCHEMA_VERSION, encode_json
+from .campaign_plan import TrialSpec
+from .contracts import SCHEMA_VERSION, encode_json
 
 STATES = (
     "planned",

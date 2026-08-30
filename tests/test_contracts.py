@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from contracts import (
+from harness.contracts import (
     SCHEMA_VERSION,
     CampaignManifest,
     CheckoutPath,

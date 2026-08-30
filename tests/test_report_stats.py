@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from report_stats import (
+from harness.report_stats import (
     conditional_repair_rate,
     end_to_end_rate,
     failure_counts,

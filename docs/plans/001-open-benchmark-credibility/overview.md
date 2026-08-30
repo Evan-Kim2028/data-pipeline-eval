@@ -149,7 +149,7 @@ Each phase has static and CLI checks. The full program must also pass [testing.m
 - Use `interrogate` before freezing contested sandbox, denominator, interval, artifact, or release decisions.
 - Run `/deslop` before every commit and `unslop` over prompts, explanations, and documentation.
 - Use `control-cli` for real command-line refusal, failure, interruption, resume, replay, and success paths.
-- Keep a committed append-only `.audit/open-benchmark-credibility.tsv` through the `show-me-your-work` skill. Record decisions, integrated commits, verification evidence, pushes, and reversions.
+- Keep a committed append-only [`audit.tsv`](./audit.tsv) through the `show-me-your-work` skill. Record decisions, integrated commits, verification evidence, pushes, and reversions.
 - Use `babysit` after opening the PR.
 - Prefer deletion over compatibility code. Remove the fuzzy patcher and duplicate solution tree instead of wrapping them.
 - Do not advance after a red phase. Fix or revert the smallest failed unit, rerun its check, then continue.
@@ -165,3 +165,7 @@ Each phase has static and CLI checks. The full program must also pass [testing.m
 - The final report reproduces from tracked artifacts.
 - All implementation commits and periodic pushes are visible on the public feature branch.
 - The verified merge commit owns the immutable public tag and GitHub release.
+
+## Historical phase log
+
+[`audit.tsv`](./audit.tsv) is the working log from building this public benchmark (phases 0–8). It records decisions, integrated commits, and verification evidence. It is not a second product, not a grader input, and not part of the task corpus. Official tasks, tests, and campaign artifacts live in the repository root.

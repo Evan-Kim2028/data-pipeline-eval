@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from catalog import spec
-from checkouts import materialize, write_checkout
-from contracts import environment_digest, git_revision
+from harness.catalog import spec
+from harness.checkouts import materialize, write_checkout
+from harness.contracts import environment_digest, git_revision
 from grade import _tar_bytes
-from patches import gold_unified_diff
-from sandbox import LOCK, run_container
+from harness.patches import gold_unified_diff
+from harness.sandbox import LOCK, run_container
 
 ROOT = Path(__file__).resolve().parents[1]
 SENTINEL = "sentinel-openrouter-test-key-not-for-github"

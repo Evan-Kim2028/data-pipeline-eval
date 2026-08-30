@@ -34,4 +34,4 @@ production tree, public tests omitted from candidate messages.
 | `hard` | A correct helper used in the wrong place, or a comment that lies about cost. |
 | `very_hard` | Ordering. A patch that only satisfies the happy path fails the abort test. |
 
-Source of truth: `catalog.py`.
+Source of truth: `harness/catalog.py`.

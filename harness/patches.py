@@ -8,8 +8,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from catalog import spec
-from contracts import TaskSpec
+from .catalog import spec
+from .contracts import TaskSpec
 
 FORMAT = "format"
 POLICY = "policy"

@@ -10,8 +10,8 @@ import sys
 import tarfile
 from pathlib import Path
 
-from catalog import spec as load_spec
-from patches import apply_patch
+from .catalog import spec as load_spec
+from .patches import apply_patch
 
 IN = Path("/in")
 WORK = Path("/work")

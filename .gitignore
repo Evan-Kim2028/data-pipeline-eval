@@ -9,6 +9,7 @@ docs/findings/
 .venv/
 internal/
 .grok/
+.audit/
 warehouse/fixtures/bronze/
 warehouse/fixtures/chunks/
 warehouse/fixtures/events_history.jsonl

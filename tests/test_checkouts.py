@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from catalog import spec, validate_catalog
-from checkouts import entrypoint_source, materialize
+from harness.catalog import spec, validate_catalog
+from harness.checkouts import entrypoint_source, materialize
 
 ROOT = Path(__file__).resolve().parents[1]
 

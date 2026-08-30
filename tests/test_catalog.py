@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from catalog import TASKS, all_ids, default_ids, spec, validate_catalog
+from harness.catalog import TASKS, all_ids, default_ids, spec, validate_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 

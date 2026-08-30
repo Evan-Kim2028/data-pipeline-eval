@@ -4,9 +4,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from catalog import spec
-from checkouts import materialize, write_checkout
-from patches import (
+from harness.catalog import spec
+from harness.checkouts import materialize, write_checkout
+from harness.patches import (
     INVALID_PATCH_FORMAT,
     PATCH_DID_NOT_APPLY,
     PATCH_POLICY_REJECTED,

@@ -6,9 +6,9 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from catalog import TASKS, spec
-from checkouts import materialize
-from contracts import TaskCheckout, TaskSpec
+from .catalog import TASKS, spec
+from .checkouts import materialize
+from .contracts import TaskCheckout, TaskSpec
 
 DENIED_MARKERS = (
     "tests_held/",

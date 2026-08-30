@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from catalog import all_ids
-from contracts import (
+from harness.catalog import all_ids
+from harness.contracts import (
     SCHEMA_VERSION,
     CampaignManifest,
     GradeReport,

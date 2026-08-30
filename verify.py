@@ -14,11 +14,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from catalog import all_ids, spec, validate_catalog
-from checkouts import materialize, write_checkout
-from contracts import python_version_pin
-from grader import run_pytest
-from patches import apply_patch, gold_unified_diff
+from harness.catalog import all_ids, spec, validate_catalog
+from harness.checkouts import materialize, write_checkout
+from harness.contracts import python_version_pin
+from harness.grader import run_pytest
+from harness.patches import apply_patch, gold_unified_diff
 
 ROOT = Path(__file__).resolve().parent
 TASKS = all_ids()
