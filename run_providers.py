@@ -32,6 +32,7 @@ from catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
 from contracts import SCHEMA_VERSION, ResponseArtifact, encode_json, environment_digest, git_revision
 from patches import apply_patch
 from prompt_bundle import all_bundles, bundle_for
+from logic_trace import attach_throughput, hops_from_reasoning
 from quality import classify, tag_quality
 from sandbox import image_lock
 from trial_store import SpendEvent, TrialStore
@@ -195,6 +196,14 @@ TRIAL_ROW_KEYS = (
     "pass_held",
     "pytest",
     "error",
+    "think_s",
+    "patch_s",
+    "hop_count",
+    "hops_path",
+    "tps_out",
+    "tps_total",
+    "tps_reason",
+    "tps_think",
 )
 
 
@@ -339,6 +348,8 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
     t0 = time.perf_counter()
     last_print = t0
     phase = "wait"
+    t_think = None
+    t_patch = None
     reason_buf: list[str] = []
     content_buf: list[str] = []
     reason_n = 0
@@ -404,10 +415,14 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
             if r_bit:
                 reason_buf.append(r_bit)
                 reason_n += len(r_bit)
+                if t_think is None:
+                    t_think = now
                 phase = "think"
             if c_bit:
                 content_buf.append(c_bit)
                 content_n += len(c_bit)
+                if t_patch is None:
+                    t_patch = now
                 phase = "patch"
             if now - last_print >= 2.0:
                 _tick(task, provider, t0, phase, reason_n, content_n)
@@ -417,7 +432,14 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
     reasoning = "".join(reason_buf)
     content = "".join(content_buf)
     text = content.strip() or reasoning.strip()
-    latency_s = time.perf_counter() - t0
+    ended = time.perf_counter()
+    latency_s = ended - t0
+    think_s = None
+    patch_s = None
+    if t_think is not None:
+        think_s = round((t_patch if t_patch is not None else ended) - t_think, 3)
+    if t_patch is not None:
+        patch_s = round(ended - t_patch, 3)
     _tick(task, provider, t0, "done", len(reasoning), len(content), finish_reason or "")
     LOGS.mkdir(parents=True, exist_ok=True)
     raw_path = LOGS / f"raw-{task}-{provider}-{gen_id}.json"
@@ -443,6 +465,8 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
         "raw_path": str(raw_path),
         "stream": True,
         "tool_calls": 0,
+        "think_s": think_s,
+        "patch_s": patch_s,
     }
     if not text:
         raise RuntimeError(f"empty content finish_reason={finish_reason}")
@@ -507,8 +531,8 @@ def _write_last_run(run_meta: dict, rows: list[dict], spend: float) -> None:
         f"comparable `{run_meta.get('comparable')}`  sha `{run_meta.get('benchmark_repo_sha')}`  "
         f"spend~${spend:.4f}",
         "",
-        "| task | provider | trial | pass | quality | shown | held | latency_s | prompt | completion | reason_tok | cached | cost | files | +ln | -ln | error |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| task | provider | trial | pass | quality | shown | held | latency_s | prompt | completion | reason_tok | hops | tps_out | cached | cost | files | +ln | -ln | error |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         err = (r.get("error") or "").replace("|", " ")
@@ -517,6 +541,7 @@ def _write_last_run(run_meta: dict, rows: list[dict], spend: float) -> None:
             f"{r.get('pass')} | {r.get('quality') or ''} | {r.get('pass_shown')} | "
             f"{r.get('pass_held')} | {r.get('latency_s', '')} | {r.get('prompt_tokens', '')} | "
             f"{r.get('completion_tokens', '')} | {r.get('reasoning_tokens', '')} | "
+            f"{r.get('hop_count', '')} | {r.get('tps_out', '')} | "
             f"{r.get('cached_tokens', '')} | {r.get('cost', '')} | "
             f"{r.get('files_changed_n', '')} | {r.get('lines_added', '')} | "
             f"{r.get('lines_deleted', '')} | {err} |"
@@ -572,6 +597,20 @@ def _run_pair(
         if meta.get("cost"):
             with SPEND_LOCK:
                 spend[0] += float(meta["cost"])
+        hops: list[dict] = []
+        raw_file = Path(str(meta.get("raw_path") or ""))
+        if raw_file.is_file():
+            payload = json.loads(raw_file.read_text())
+            hops = hops_from_reasoning(
+                ((payload.get("choice") or {}).get("message") or {}).get("reasoning") or ""
+            )
+        row["hop_count"] = len(hops)
+        hop_dir = LOGS / "runs" / str(run_meta["run_id"]) / "hops"
+        hop_dir.mkdir(parents=True, exist_ok=True)
+        hop_path = hop_dir / f"{task}__{provider}__t{trial}.json"
+        hop_path.write_text(json.dumps({"hops": hops}, indent=2)[:200_000])
+        row["hops_path"] = str(hop_path)
+        attach_throughput(row)
         _out(f"  {task}/{provider}  t{trial}  applying patch ({meta.get('content_chars', 0)}c)")
         report = apply_patch(tmp, spec(task), raw.encode() if isinstance(raw, str) else raw)
         row["patch_status"] = report.status

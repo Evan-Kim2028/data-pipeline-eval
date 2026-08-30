@@ -109,6 +109,9 @@ def test_trial_row_keys_frozen():
         "quality",
         "cost_prompt",
         "files_changed_n",
+        "hop_count",
+        "tps_out",
+        "think_s",
     }
     assert required <= set(TRIAL_ROW_KEYS)
 
@@ -206,6 +209,8 @@ def test_write_findings_markdown_and_html_share_numbers(tmp_path):
         assert "one-shot" in blob
         assert "reasoning_tokens" in blob or "reason_tok" in blob
         assert "cached" in blob
+        assert "tps_out" in blob
+        assert "hops" in blob
         assert "<script type=\"module\"" not in blob
     assert "<html" in page
 
