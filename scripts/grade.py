@@ -7,11 +7,15 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import tarfile
 import tempfile
 import time
 from io import BytesIO
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from harness.catalog import spec
 from harness.checkouts import materialize, write_checkout
@@ -23,7 +27,6 @@ from harness.contracts import (
 )
 from harness.sandbox import image_lock, run_container
 
-ROOT = Path(__file__).resolve().parent
 _PROXY = (
     "HTTP_PROXY",
     "HTTPS_PROXY",

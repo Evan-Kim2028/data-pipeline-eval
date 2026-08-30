@@ -3,15 +3,15 @@
 Public gym for data-pipeline incidents. Generic lakehouse, not a
 product dump. Names are directory ids. **Category** clusters them;
 **difficulty** is estimated (`docs/TAXONOMY.md`). Catalog:
-`harness/catalog.py`. Fifteen tasks. Anyone can clone and grade.
+`harness/catalog.py`. Fifteen tasks.
 
 | Category | What the incident is about |
 |---|---|
-| `schema` | Inferred dtypes, warehouse binders, mixed ids in one batch. |
+| `schema` | Guessed column types, a date sent as timestamptz, mixed ids in one load. |
 | `time` | Which clock the job uses for lookbacks and cutoffs. |
-| `incremental` | Cheap emptiness/skip probes that accidentally plan full work. |
+| `incremental` | Cheap skip checks that still plan a full scan. |
 | `serving` | What readers or the next run treat as current or done. |
-| `concurrency` | Stale handles, OCC, retry that does not re-read. |
+| `concurrency` | Stale table handles. Optimistic-concurrency retry that does not re-read. |
 
 | Task | Category | Difficulty | Suite |
 |---|---|---|---|
@@ -31,15 +31,15 @@ product dump. Names are directory ids. **Category** clusters them;
 | `drop_resurrect` | serving | very_hard | default |
 | `occ_retry` | concurrency | hard | default |
 
-Practice tests (`tasks/<id>/tests`) and adjudication tests
-(`tasks/<id>/tests_adjudication`) are public. Official candidate
-messages omit both. Gold is the un-faulted `warehouse/` tree.
-Explanations live in `docs/solutions/` as prose.
+Each task has practice tests in `tasks/<id>/tests` and a second
+suite in `tasks/<id>/tests_adjudication`. Both are public and both
+run at grade time. Official prompts include neither. Gold is the
+working `warehouse/` tree. Writeups are `docs/solutions/`.
 
-## Install (no spend)
+## Install
 
 Python 3.14.3 (`.python-version`). `verify.py` warns if the running
-interpreter does not match. Local pytest. No Docker or API key.
+interpreter does not match.
 
 ```sh
 git clone https://github.com/Evan-Kim2028/data-pipeline-eval.git
@@ -50,13 +50,11 @@ python -m pip install --require-hashes -r requirements.lock
 python verify.py
 ```
 
-Each task is red on the fault overlay and green after the gold patch.
-`python verify.py --validate-catalog` only checks the catalog and
-checkouts.
+Each task fails on the broken files in `tasks/<id>/fault` and
+passes after the gold patch. `python verify.py --validate-catalog`
+only checks the catalog and task files.
 
-## Replicate a host bake-off
-
-Needs an OpenRouter key. `--spend` is required for provider calls.
+## Replicate
 
 ```sh
 export OPENROUTER_API_KEY=sk-or-...   # or a one-line .env
@@ -73,38 +71,7 @@ python run_providers.py --spend --variance -k 5 --providers z-ai,novita,deepinfr
 ```
 
 Each run writes `logs/runs/<id>.jsonl` (gitignored) and
-`logs/runs/<id>/LAST_RUN.md`. Resume without re-spend:
-`--spend --continue-run <id>`. Turn a jsonl into tables with
-`python scripts/write_findings.py <jsonl> --out <dir>`. Harness lock:
-`docs/HARNESS.md`.
-
-Comparable published rows need a full `benchmark_repo_sha`,
-`grader_source_sha`, immutable grader image digest, prompt hash, and
-`environment_sha256`.
-
-## Layout
-
-Root CLIs are `verify.py`, `run_providers.py`, `grade.py`, and
-`report.py`. Library code is `harness/`. `grade.py` uses the pinned
-Docker image (`docs/DOCKER.md`).
-
-## Official campaign (frozen pins)
-
-`grade.py` needs the pinned Docker image.
-
-```sh
-python scripts/setup_eval.py --seed 42
-python verify.py --validate-catalog
-python scripts/audit_tasks.py
-python run_providers.py --check-prompts
-python run_providers.py --campaign campaigns/official-v1.json --plan
-python run_providers.py --campaign campaigns/official-v1.json --preflight
-python grade.py --response saved-response.json
-python report.py --manifest campaigns/official-v1.json --trials results/official-v1/trials.jsonl --out reports/official-v1
-python report.py --manifest campaigns/official-v1.json --trials results/official-v1/trials.jsonl --out reports/official-v1 --check
-python scripts/check_release.py
-```
-
-Frozen campaigns pin the public clone, grader image, and prompt
-hashes. `--resume` regrades a saved `ResponseArtifact` without
-another request.
+`logs/runs/<id>/LAST_RUN.md`. Resume an incomplete run with
+`--spend --continue-run <id>`. Tables:
+`python scripts/write_findings.py <jsonl> --out <dir>`.
+Request lock: `docs/HARNESS.md`.

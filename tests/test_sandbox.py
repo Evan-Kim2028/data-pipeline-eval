@@ -12,7 +12,7 @@ import pytest
 from harness.catalog import spec
 from harness.checkouts import materialize, write_checkout
 from harness.contracts import environment_digest, git_revision
-from grade import _tar_bytes
+from scripts.grade import _tar_bytes
 from harness.patches import gold_unified_diff
 from harness.sandbox import LOCK, run_container
 

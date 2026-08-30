@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clean-clone release checks. No provider spend. No tag creation."""
+"""Clean-clone release checks. Does not call providers or create tags."""
 
 from __future__ import annotations
 
@@ -52,8 +52,8 @@ def main() -> int:
         text = bundle.content.decode("utf-8")
         if "tests_adjudication" in text or "def test_" in text:
             errors.append(f"prompt leak in {task_id}")
-    if not _stdlib_only(ROOT / "report.py"):
-        errors.append("report.py is not standard-library-only")
+    if not _stdlib_only(ROOT / "scripts" / "report.py"):
+        errors.append("scripts/report.py is not standard-library-only")
     if not _stdlib_only(ROOT / "harness" / "report_stats.py"):
         errors.append("harness/report_stats.py is not standard-library-only")
     if args.manifest.is_file():
@@ -63,7 +63,7 @@ def main() -> int:
         if man.get("grader_image_digest") != lock.get("digest"):
             errors.append("official manifest image digest mismatch")
     compile_rc = subprocess.run(
-        [sys.executable, "-m", "compileall", "-q", str(ROOT / "grade.py"), str(ROOT / "report.py")],
+        [sys.executable, "-m", "compileall", "-q", str(ROOT / "scripts" / "grade.py"), str(ROOT / "scripts" / "report.py")],
         cwd=ROOT,
     ).returncode
     if compile_rc != 0:
@@ -72,7 +72,7 @@ def main() -> int:
         proc = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "report.py"),
+                str(ROOT / "scripts" / "report.py"),
                 "--manifest",
                 str(args.manifest),
                 "--trials",

@@ -14,7 +14,7 @@ import pytest
 from harness.catalog import spec
 from harness.checkouts import materialize, write_checkout
 from harness.contracts import environment_digest
-from grade import _tar_bytes, verify_pins
+from scripts.grade import _tar_bytes, verify_pins
 from harness.patches import gold_unified_diff
 from harness.sandbox import image_lock
 
@@ -44,7 +44,7 @@ def test_task_archive_has_faulted_checkout_and_public_tests_only():
 
 
 def test_grade_modules_do_not_import_providers():
-    for name in ("grade.py", "harness/grader.py", "harness/sandbox.py"):
+    for name in ("scripts/grade.py", "harness/grader.py", "harness/sandbox.py"):
         text = (ROOT / name).read_text()
         assert "import run_providers" not in text
         assert "from run_providers" not in text

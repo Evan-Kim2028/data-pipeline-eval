@@ -13,7 +13,7 @@ from .contracts import CheckoutPath, ContractError, RepoPath, TaskSpec
 CATEGORIES = {
     "schema": {
         "label": "Schema & types",
-        "about": "Inferred dtypes, warehouse binders, mixed ids in one batch.",
+        "about": "Guessed column types, a date sent as timestamptz, mixed ids in one load.",
     },
     "time": {
         "label": "Time & calendars",
@@ -21,7 +21,7 @@ CATEGORIES = {
     },
     "incremental": {
         "label": "Incremental I/O",
-        "about": "Cheap emptiness/skip probes that accidentally plan full work.",
+        "about": "Cheap skip checks that still plan a full scan.",
     },
     "serving": {
         "label": "Serving contracts",
@@ -29,7 +29,7 @@ CATEGORIES = {
     },
     "concurrency": {
         "label": "Concurrent writers",
-        "about": "Stale handles, OCC, retry that does not re-read.",
+        "about": "Stale table handles. Optimistic-concurrency retry that does not re-read.",
     },
 }
 

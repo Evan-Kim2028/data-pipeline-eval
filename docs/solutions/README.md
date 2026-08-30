@@ -1,7 +1,8 @@
 # Gold solutions
 
-`warehouse/` is the only executable gold. Each task overlays one
-fault onto that tree. Explanations in this directory are prose.
+`warehouse/` is the only executable gold. Each task replaces one
+file in that tree with a broken copy under `tasks/<id>/fault`.
+Writeups in this directory are prose.
 
 Generate the official gold unified diff with:
 

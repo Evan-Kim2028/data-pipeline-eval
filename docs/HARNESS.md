@@ -5,9 +5,9 @@ Model slug `z-ai/glm-5.3-flash`. Thinking cannot be disabled.
 
 | Setting | Value | Why |
 |---|---|---|
-| `temperature` | `0` | Repeatable host bake-off. |
+| `temperature` | `0` | Same request, one host. |
 | `max_tokens` | `131072` | Model max output. |
-| `reasoning.effort` | `high` | Bake-off default. |
+| `reasoning.effort` | `high` | Default. |
 | `provider.only` | one host | No fallback. |
 | `allow_fallbacks` | `false` | Same. |
 | `require_parameters` | `true` | Official campaigns. |
@@ -30,10 +30,10 @@ short-wrong means a short CoT that still missed the grade; no-reply
 means no quality tag and no hops (HTTP 429 or stream drop), not
 short-wrong. Gold solution text is not a classifier input.
 `no_response` trials stay in n and fail-mode counts; hop and think
-means skip them. Each trial row stores `fail_mode`. Bake-off request
-bodies match except `provider.only`.
+means skip them. Each trial row stores `fail_mode`. Request bodies
+match except `provider.only`.
 
-Bake-off apply unwraps markdown fences and prefers a diff/patch
+Apply unwraps markdown fences and prefers a diff/patch
 fence or a body that starts with `diff --git` / `--- a/`. A leading
 Python diagnosis fence is skipped. Trailing prose after the last
 hunk line is stripped. `@@` headers are rewritten from unique
@@ -57,8 +57,8 @@ Stream reads abort after 45s with no new tokens (`stream stall`) or
 240s wall (`stream wall`). Keepalives no longer keep a trial alive
 for hours. Three infra failures in a row for one host (HTTP 429,
 stall, stream drop) skip the rest of that host without more OpenRouter
-calls. Resume an incomplete bake-off with
-`--spend --continue-run <run_id>` — already-written pairs are skipped.
+calls. Resume an incomplete run with
+`--spend --continue-run <run_id>`. Already-written pairs are skipped.
 
 `logs/LAST_RUN.md` is the latest table. A copy is also written to
 `logs/runs/<run_id>/LAST_RUN.md`. The jsonl for that run is rewritten
@@ -70,9 +70,9 @@ Official campaigns:
 python run_providers.py --campaign campaigns/official-v1.json --plan
 python run_providers.py --campaign campaigns/official-v1.json --preflight
 python run_providers.py --campaign campaigns/official-v1.json --resume
-python report.py --manifest campaigns/official-v1.json --trials results/official-v1/trials.jsonl --out reports/official-v1 --check
+python scripts/report.py --manifest campaigns/official-v1.json --trials results/official-v1/trials.jsonl --out reports/official-v1 --check
 ```
 
-`--resume` regrades saved artifacts. `--spend` is required to call
-OpenRouter. Compare published campaign rows only at the frozen
-`benchmark_repo_sha`, `grader_source_sha`, and image digest.
+`--resume` grades a saved model response again. `--spend` is required
+to call OpenRouter. Published campaign rows compare only at the same
+repo commit, grader commit, and Docker image.

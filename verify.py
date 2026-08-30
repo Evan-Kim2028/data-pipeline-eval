@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Red starters / green gold through the shared grader primitives. No network.
+"""Each task fails on the broken warehouse and passes after the gold patch. No network.
 
-Practice tests: tasks/<id>/tests
-Adjudication tests: tasks/<id>/tests_adjudication (public, omitted from official prompts)
+Practice: tasks/<id>/tests
+Also graded, omitted from official prompts: tasks/<id>/tests_adjudication
 """
 
 from __future__ import annotations

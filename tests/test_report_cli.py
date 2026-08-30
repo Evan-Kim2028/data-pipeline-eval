@@ -15,7 +15,7 @@ def test_report_twice_is_byte_identical(tmp_path: Path):
     second = tmp_path / "b"
     cmd = [
         sys.executable,
-        str(ROOT / "report.py"),
+        str(ROOT / "scripts" / "report.py"),
         "--manifest",
         str(MINI),
         "--trials",
@@ -29,7 +29,7 @@ def test_report_twice_is_byte_identical(tmp_path: Path):
     subprocess.run(
         [
             sys.executable,
-            str(ROOT / "report.py"),
+            str(ROOT / "scripts" / "report.py"),
             "--manifest",
             str(MINI),
             "--trials",
@@ -47,7 +47,7 @@ def test_report_twice_is_byte_identical(tmp_path: Path):
     check = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "report.py"),
+            str(ROOT / "scripts" / "report.py"),
             "--manifest",
             str(MINI),
             "--trials",
@@ -77,7 +77,7 @@ def test_report_rejects_duplicates_and_unknown_providers(tmp_path: Path):
     proc = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "report.py"),
+            str(ROOT / "scripts" / "report.py"),
             "--manifest",
             str(MINI),
             "--trials",
@@ -97,7 +97,7 @@ def test_report_rejects_duplicates_and_unknown_providers(tmp_path: Path):
     proc = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "report.py"),
+            str(ROOT / "scripts" / "report.py"),
             "--manifest",
             str(MINI),
             "--trials",

@@ -848,7 +848,7 @@ def grade_env() -> dict[str, str]:
 
 def invoke_grade(artifact_path: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(ROOT / "grade.py"), "--response", str(artifact_path)],
+        [sys.executable, str(ROOT / "scripts" / "grade.py"), "--response", str(artifact_path)],
         cwd=ROOT,
         env=grade_env(),
         capture_output=True,

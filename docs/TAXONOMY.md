@@ -9,18 +9,11 @@ minus that task's end-to-end rate and does not replace these labels.
 
 | id | Label | What the incident is about |
 |---|---|---|
-| `schema` | Schema & types | Inferred dtypes, binders, mixed ids |
+| `schema` | Schema & types | Guessed column types, a date sent as timestamptz, mixed ids |
 | `time` | Time & calendars | Host clock vs warehouse dates |
-| `incremental` | Incremental I/O | Cheap probes that plan full work |
+| `incremental` | Incremental I/O | Cheap skip checks that still plan a full scan |
 | `serving` | Serving contracts | What readers / next run treat as current or done |
-| `concurrency` | Concurrent writers | Stale handles, OCC retry |
-
-`latest_pointer`, `watermark_poison`, `mtime_skip`, and
-`drop_resurrect` share **serving**. `entity_reload`, `frozen_basis`,
-`read_write_split`, and `rebuild_wipe` share **incremental**.
-`schema_infer` and `field_readd` are **schema**. `late_event_close`
-and `utc_lookback` share **time**. `occ_retry` is **concurrency**.
-`timestamptz_cutoff` is calibration **schema**.
+| `concurrency` | Concurrent writers | Stale handles. Optimistic-concurrency retry |
 
 ## Difficulty (estimated)
 

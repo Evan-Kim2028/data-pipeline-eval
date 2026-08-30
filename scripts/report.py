@@ -9,7 +9,10 @@ import json
 import sys
 from pathlib import Path
 
-from harness import report_stats
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from harness import report_stats  # noqa: E402
 
 
 def _load_jsonl(path: Path) -> list[dict]:
