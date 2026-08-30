@@ -1,9 +1,14 @@
 # data-pipeline-eval
 
 This repository is a public eval of fifteen broken lakehouse jobs.
-The model reads the incident text and writes a unified diff. Pytest
-grades the repair. The warehouse is a generic lakehouse built for
-this eval.
+I wrote it after watching models miss pipeline repairs in a
+lakehouse I run. The warehouse here is generic. The failure modes
+are ones I have seen: inferred types, the wrong clock, a skip
+check that still plans a full scan, a reader that treats the
+wrong file as current, and a retry that reuses a stale handle.
+
+The model reads the incident text and writes a unified diff.
+Pytest grades the repair.
 
 > ValueError: Invalid timestamp with zone: 2026-07-13
 >
