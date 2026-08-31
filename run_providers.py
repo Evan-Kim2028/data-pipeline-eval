@@ -1349,9 +1349,15 @@ def main() -> int:
         ):
             if key in first and first[key] is not None:
                 run_meta[key] = first[key]
+    extra = ""
+    if needs_fireworks:
+        extra = (
+            f"  fireworks_pad={run_meta.get('fireworks_pad_chars')}  "
+            f"session={run_meta.get('fireworks_session')}"
+        )
     _out(
         f"run {run_id}  {len(pairs)} pairs  jobs={jobs}  k={args.k}  "
-        f"effort={REASONING_EFFORT}  temp={TEMPERATURE}"
+        f"effort={REASONING_EFFORT}  temp={TEMPERATURE}{extra}"
     )
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         futs = [
