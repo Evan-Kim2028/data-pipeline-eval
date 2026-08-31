@@ -21,6 +21,10 @@ They leave tests, gold files, and task mechanisms unnamed.
 `python run_providers.py --check-prompts` reprints SHA-256 digests.
 Changing that instruction sentence starts a new prompt campaign.
 
+`python scripts/score_cot.py logs/runs/<id>.jsonl` scores hop-0
+against the gold/trap lexemes in `docs/solutions` and the last
+mechanism claim against the applied hunk. Gold text stays offline.
+
 Hop-trace fail modes (`logic_trace.cot_fail_mode`) fold hop lists
 plus trial quality. The tokens are `pass`, `apply_fail`,
 `overthink`, `short_wrong`, and `no_response`. Pass means shown
