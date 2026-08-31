@@ -66,6 +66,15 @@ Already-written pairs are skipped.
 `logs/runs/<run_id>/LAST_RUN.md`. The jsonl for that run is
 rewritten in catalog task order, then provider, then trial.
 
+OpenRouter does not surface Fireworks prefix-cache hits. Call
+`https://api.fireworks.ai/inference/v1/chat/completions` directly
+with `accounts/fireworks/models/glm-5p3-flash`. Send the same
+session id as JSON `prompt_cache_key` / `user` and as the
+`x-session-affinity` header. Hits show up on
+`fireworks-cached-prompt-tokens` and
+`usage.prompt_tokens_details.cached_tokens`. Probe with
+`FIREWORKS_API_KEY=... python scripts/probe_fireworks_cache.py`.
+
 Official campaigns:
 
 ```sh
