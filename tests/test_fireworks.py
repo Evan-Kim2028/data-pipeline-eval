@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from harness.fireworks import request_body, request_headers, stable_pad, usage_from_fireworks
+from harness.fireworks import (
+    estimate_cost,
+    request_body,
+    request_headers,
+    session_key_for_task,
+    stable_pad,
+    usage_from_fireworks,
+)
 
 
 def test_stable_pad_is_deterministic_and_exact():
@@ -49,6 +56,17 @@ def test_usage_from_fireworks_prefers_body_then_headers():
     assert fields["cache_write_tokens"] == 176
     assert fields["header_cached_tokens"] == 1024
     assert fields["prompt_tokens"] == 1200
+
+
+def test_estimate_cost_uses_published_glm_flash_rates():
+    assert estimate_cost(prompt_tokens=1_000_000, cached_tokens=0, completion_tokens=0) == 0.15
+    assert estimate_cost(prompt_tokens=1_000_000, cached_tokens=1_000_000, completion_tokens=0) == 0.029
+    assert estimate_cost(prompt_tokens=0, cached_tokens=0, completion_tokens=1_000_000) == 0.5
+    assert estimate_cost() is None
+
+
+def test_session_key_pins_the_task():
+    assert session_key_for_task("field_readd") == "dpe-field_readd"
 
 
 def test_usage_from_fireworks_falls_back_to_headers():

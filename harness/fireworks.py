@@ -18,6 +18,10 @@ PROMPT_HEADER = "fireworks-prompt-tokens"
 SESSION_HEADER = "x-session-affinity"
 ISOLATION_HEADER = "x-prompt-cache-isolation-key"
 PAD_UNIT = "static warehouse context for prefix cache. "
+PROVIDER = "fireworks-direct"
+PROMPT_USD_PER_M = 0.15
+CACHED_USD_PER_M = 0.029
+COMPLETION_USD_PER_M = 0.50
 
 
 def stable_pad(n: int) -> str:
@@ -115,3 +119,30 @@ def usage_from_fireworks(usage: dict | None, headers: dict | None = None) -> dic
         "header_cached_tokens": _int_or_none(_header(headers, CACHE_HEADER)),
         "header_prompt_tokens": _int_or_none(_header(headers, PROMPT_HEADER)),
     }
+
+
+def session_key_for_task(task_id: str) -> str:
+    return f"dpe-{task_id}"
+
+
+def estimate_cost(
+    *,
+    prompt_tokens: object = None,
+    cached_tokens: object = None,
+    completion_tokens: object = None,
+) -> float | None:
+    """Published serverless GLM 5.3 Flash rates: $0.15 / $0.029 / $0.50 per 1M."""
+    prompt = _int_or_none(prompt_tokens)
+    completion = _int_or_none(completion_tokens)
+    if prompt is None and completion is None:
+        return None
+    prompt_n = prompt or 0
+    cached_n = min(_int_or_none(cached_tokens) or 0, prompt_n)
+    uncached = max(prompt_n - cached_n, 0)
+    completion_n = completion or 0
+    usd = (
+        uncached * PROMPT_USD_PER_M
+        + cached_n * CACHED_USD_PER_M
+        + completion_n * COMPLETION_USD_PER_M
+    ) / 1_000_000
+    return round(usd, 8)

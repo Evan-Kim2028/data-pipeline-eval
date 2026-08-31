@@ -230,6 +230,30 @@ def test_cli_has_k_and_variance():
     assert "--variance" in proc.stdout
     assert "-k" in proc.stdout
     assert "--continue-run" in proc.stdout
+    assert "fireworks-direct" in proc.stdout
+
+
+def test_fireworks_direct_spend_needs_fireworks_key(monkeypatch):
+    monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "run_providers.py"),
+            "--spend",
+            "--variance",
+            "-k",
+            "1",
+            "--providers",
+            "fireworks-direct",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 2
+    assert "FIREWORKS_API_KEY" in proc.stderr
+    assert "OPENROUTER_API_KEY" not in proc.stderr
 
 
 def test_write_last_run_column_header(tmp_path, monkeypatch):

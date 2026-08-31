@@ -77,6 +77,11 @@ messages are 400-575 tokens and stay at `cached_tokens=0`. A
 stable prefix of about 1k tokens starts reporting hits, usually
 in 640-token steps. Probe with
 `FIREWORKS_API_KEY=... python scripts/probe_fireworks_cache.py`.
+The same host can run the official 9-task variance:
+
+```sh
+FIREWORKS_API_KEY=fw_... python run_providers.py --spend --variance -k 1 --providers fireworks-direct --jobs 1
+```
 
 Official campaigns:
 

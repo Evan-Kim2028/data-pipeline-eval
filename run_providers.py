@@ -5,6 +5,7 @@
     python run_providers.py --spend --smoke     # timestamptz_cutoff on z-ai, novita
     python run_providers.py --spend --golden    # 5-task ladder on z-ai, novita
     python run_providers.py --spend --hard      # very_hard tasks on z-ai, novita
+    python run_providers.py --spend --variance -k 1 --providers fireworks-direct --jobs 1
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from dataclasses import asdict
 
 from harness.campaign_plan import Campaign, CampaignError, expand, load_campaign
 from harness.catalog import GOLDEN_IDS, all_ids, default_ids, hard_ids, spec
+from harness import fireworks as fireworks_direct
 from harness.contracts import SCHEMA_VERSION, ResponseArtifact, encode_json, environment_digest, git_revision
 from harness.patches import apply_patch
 from harness.prompt_bundle import all_bundles, bundle_for
@@ -431,20 +433,41 @@ def _attach_fail_mode(row: dict, hops: list[dict] | None = None) -> dict:
 
 
 def _complete(message: str, provider: str, *, task: str, require_parameters: bool = False) -> tuple[str, dict]:
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not key:
-        raise SystemExit("OPENROUTER_API_KEY is not set")
-    body = request_body(message, provider, require_parameters=require_parameters)
-    req = urllib.request.Request(
-        API,
-        data=json.dumps(body).encode(),
-        headers={
+    if provider == fireworks_direct.PROVIDER:
+        key = os.environ.get("FIREWORKS_API_KEY", "")
+        if not key:
+            raise SystemExit("FIREWORKS_API_KEY is not set")
+        session = fireworks_direct.session_key_for_task(task)
+        body = fireworks_direct.request_body(
+            message,
+            session_key=session,
+            max_tokens=MAX_TOKENS,
+            temperature=TEMPERATURE,
+            reasoning_effort=REASONING_EFFORT,
+            stream=True,
+        )
+        headers = fireworks_direct.request_headers(key, session)
+        headers["Accept"] = "text/event-stream"
+        url = fireworks_direct.API
+        served_default = fireworks_direct.PROVIDER
+    else:
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not key:
+            raise SystemExit("OPENROUTER_API_KEY is not set")
+        body = request_body(message, provider, require_parameters=require_parameters)
+        headers = {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
             "HTTP-Referer": "https://github.com/Evan-Kim2028",
             "X-OpenRouter-Title": "data-pipeline-eval",
-        },
+        }
+        url = API
+        served_default = provider
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        headers=headers,
         method="POST",
     )
     t0 = time.perf_counter()
@@ -460,13 +483,15 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
     usage: dict = {}
     gen_id = "unknown"
     finish_reason = None
-    host = provider
+    host = served_default
+    resp_headers: dict = {}
     _tick(task, provider, t0, phase, 0, 0, "requesting")
     resp = None
     last_http = b""
     for attempt in range(RETRY_429):
         try:
             resp = urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S)
+            resp_headers = {k: v for k, v in resp.headers.items()}
             break
         except urllib.error.HTTPError as exc:
             last_http = exc.read()
@@ -533,6 +558,8 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
             if choice.get("finish_reason"):
                 finish_reason = choice.get("finish_reason")
             delta = choice.get("delta") or {}
+            if not delta and isinstance(choice.get("message"), dict):
+                delta = choice["message"]
             r_bit, c_bit = _delta_piece(delta)
             if r_bit:
                 reason_buf.append(r_bit)
@@ -578,10 +605,24 @@ def _complete(message: str, provider: str, *, task: str, require_parameters: boo
         indent=2,
     )
     raw_path.write_text(dumped[:200_000])
+    if provider == fireworks_direct.PROVIDER:
+        fields = fireworks_direct.usage_from_fireworks(usage, resp_headers)
+        fields["cost"] = fireworks_direct.estimate_cost(
+            prompt_tokens=fields.get("prompt_tokens"),
+            cached_tokens=fields.get("cached_tokens"),
+            completion_tokens=fields.get("completion_tokens"),
+        )
+        fields["cost_prompt"] = None
+        fields["cost_completion"] = None
+        model_name = fireworks_direct.MODEL
+    else:
+        fields = usage_from_openrouter(usage)
+        model_name = MODEL
     meta = {
         "provider": host,
+        "model": model_name,
         "latency_s": round(latency_s, 3),
-        **usage_from_openrouter(usage),
+        **fields,
         "id": gen_id,
         "finish_reason": finish_reason,
         "content_chars": len(content),
@@ -1075,7 +1116,7 @@ def main() -> int:
     ap.add_argument(
         "--spend",
         action="store_true",
-        help="Call OpenRouter. Off by default; I will not spend without this flag.",
+        help="Call a model host. Off by default; I will not spend without this flag.",
     )
     ap.add_argument("--task", choices=ALL_TASKS, action="append")
     ap.add_argument(
@@ -1105,7 +1146,11 @@ def main() -> int:
         metavar="N",
         help="Replicates per (task, host). Default 1.",
     )
-    ap.add_argument("--providers", default=",".join(DEFAULT_PROVIDERS))
+    ap.add_argument(
+        "--providers",
+        default=",".join(DEFAULT_PROVIDERS),
+        help="Comma-separated hosts. fireworks-direct calls api.fireworks.ai (needs FIREWORKS_API_KEY).",
+    )
     ap.add_argument(
         "--jobs",
         type=int,
@@ -1205,6 +1250,14 @@ def main() -> int:
         providers = ["z-ai", "novita"]
     else:
         providers = [p.strip() for p in args.providers.split(",") if p.strip()]
+    needs_openrouter = any(p != fireworks_direct.PROVIDER for p in providers)
+    needs_fireworks = any(p == fireworks_direct.PROVIDER for p in providers)
+    if needs_openrouter and not os.environ.get("OPENROUTER_API_KEY"):
+        print("OPENROUTER_API_KEY is not set", file=sys.stderr)
+        return 2
+    if needs_fireworks and not os.environ.get("FIREWORKS_API_KEY"):
+        print("FIREWORKS_API_KEY is not set", file=sys.stderr)
+        return 2
     pairs = trial_pairs(tasks, providers, args.k)
     spend = [0.0]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -1235,7 +1288,9 @@ def main() -> int:
         "run_id": run_id,
         "campaign_id": run_id,
         "ts": datetime.now(timezone.utc).isoformat(),
-        "model": MODEL,
+        "model": fireworks_direct.MODEL
+        if providers == [fireworks_direct.PROVIDER]
+        else MODEL,
         "temperature": TEMPERATURE,
         "max_tokens": MAX_TOKENS,
         "reasoning_effort": REASONING_EFFORT,
