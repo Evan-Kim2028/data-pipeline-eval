@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from harness.fireworks import request_body, request_headers, usage_from_fireworks
+from harness.fireworks import request_body, request_headers, stable_pad, usage_from_fireworks
+
+
+def test_stable_pad_is_deterministic_and_exact():
+    assert stable_pad(0) == ""
+    assert stable_pad(-3) == ""
+    first = stable_pad(4000)
+    assert first == stable_pad(4000)
+    assert len(first) == 4000
+    assert first.startswith("static warehouse context")
 
 
 def test_request_body_sets_cache_affinity():

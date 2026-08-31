@@ -27,6 +27,7 @@ from harness.fireworks import (  # noqa: E402
     MODEL,
     request_body,
     request_headers,
+    stable_pad,
     usage_from_fireworks,
 )
 from harness.prompt_bundle import bundle_for  # noqa: E402
@@ -103,9 +104,18 @@ def main() -> int:
         default="",
         help="Appended after the official prompt so the shared prefix stays stable.",
     )
+    ap.add_argument(
+        "--pad-chars",
+        type=int,
+        default=0,
+        help="Prepend a stable filler block so the prefix is long enough to cache.",
+    )
     args = ap.parse_args()
     if args.rounds < 1:
         print("--rounds must be >= 1", file=sys.stderr)
+        return 2
+    if args.pad_chars < 0:
+        print("--pad-chars must be >= 0", file=sys.stderr)
         return 2
     key = os.environ.get("FIREWORKS_API_KEY", "")
     if not key:
@@ -113,6 +123,9 @@ def main() -> int:
         return 2
     bundle = bundle_for(args.task, ROOT)
     message = bundle.content.decode("utf-8")
+    pad = stable_pad(args.pad_chars)
+    if pad:
+        message = pad + "\n" + message
     if args.suffix:
         message = message + args.suffix
     session_key = args.session
@@ -146,6 +159,7 @@ def main() -> int:
         "task": args.task,
         "prompt_sha256": bundle.sha256,
         "prompt_bytes": len(bundle.content),
+        "pad_chars": args.pad_chars,
         "session_key": session_key,
         "isolation_key": args.isolation_key,
         "max_tokens": args.max_tokens,

@@ -17,6 +17,14 @@ CACHE_HEADER = "fireworks-cached-prompt-tokens"
 PROMPT_HEADER = "fireworks-prompt-tokens"
 SESSION_HEADER = "x-session-affinity"
 ISOLATION_HEADER = "x-prompt-cache-isolation-key"
+PAD_UNIT = "static warehouse context for prefix cache. "
+
+
+def stable_pad(n: int) -> str:
+    """Repeat a fixed block so a short official prompt can exceed the cache floor."""
+    if n <= 0:
+        return ""
+    return (PAD_UNIT * ((n // len(PAD_UNIT)) + 1))[:n]
 
 
 def request_body(

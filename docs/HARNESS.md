@@ -72,7 +72,10 @@ with `accounts/fireworks/models/glm-5p3-flash`. Send the same
 session id as JSON `prompt_cache_key` / `user` and as the
 `x-session-affinity` header. Hits show up on
 `fireworks-cached-prompt-tokens` and
-`usage.prompt_tokens_details.cached_tokens`. Probe with
+`usage.prompt_tokens_details.cached_tokens`. Official candidate
+messages are 400-575 tokens and stay at `cached_tokens=0`. A
+stable prefix of about 1k tokens starts reporting hits, usually
+in 640-token steps. Probe with
 `FIREWORKS_API_KEY=... python scripts/probe_fireworks_cache.py`.
 
 Official campaigns:
