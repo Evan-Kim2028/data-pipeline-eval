@@ -231,6 +231,8 @@ def test_cli_has_k_and_variance():
     assert "-k" in proc.stdout
     assert "--continue-run" in proc.stdout
     assert "fireworks-direct" in proc.stdout
+    assert "--fireworks-pad-chars" in proc.stdout
+    assert "--fireworks-session" in proc.stdout
 
 
 def test_fireworks_direct_spend_needs_fireworks_key(monkeypatch):

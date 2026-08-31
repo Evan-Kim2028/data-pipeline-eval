@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from harness.fireworks import (
+    DEFAULT_PAD_CHARS,
+    DEFAULT_SESSION,
     estimate_cost,
+    prefixed_message,
     request_body,
     request_headers,
+    session_key_for_run,
     session_key_for_task,
     stable_pad,
     usage_from_fireworks,
@@ -67,6 +71,20 @@ def test_estimate_cost_uses_published_glm_flash_rates():
 
 def test_session_key_pins_the_task():
     assert session_key_for_task("field_readd") == "dpe-field_readd"
+
+
+def test_run_session_is_shared_across_tasks():
+    assert session_key_for_run() == DEFAULT_SESSION
+    assert DEFAULT_PAD_CHARS == 16000
+
+
+def test_prefixed_message_keeps_the_official_tail():
+    official = "incident checkout"
+    sent = prefixed_message(official, 4000)
+    assert sent.endswith(official)
+    assert sent.startswith("static warehouse context")
+    assert len(sent) == 4000 + 1 + len(official)
+    assert prefixed_message(official, 0) == official
 
 
 def test_usage_from_fireworks_falls_back_to_headers():

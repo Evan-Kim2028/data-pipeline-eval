@@ -19,6 +19,8 @@ SESSION_HEADER = "x-session-affinity"
 ISOLATION_HEADER = "x-prompt-cache-isolation-key"
 PAD_UNIT = "static warehouse context for prefix cache. "
 PROVIDER = "fireworks-direct"
+DEFAULT_PAD_CHARS = 16000
+DEFAULT_SESSION = "dpe-fireworks-direct"
 PROMPT_USD_PER_M = 0.15
 CACHED_USD_PER_M = 0.029
 COMPLETION_USD_PER_M = 0.50
@@ -29,6 +31,14 @@ def stable_pad(n: int) -> str:
     if n <= 0:
         return ""
     return (PAD_UNIT * ((n // len(PAD_UNIT)) + 1))[:n]
+
+
+def prefixed_message(message: str, pad_chars: int) -> str:
+    """Official candidate text with a shared prefix long enough to cache."""
+    pad = stable_pad(pad_chars)
+    if not pad:
+        return message
+    return pad + "\n" + message
 
 
 def request_body(
@@ -123,6 +133,11 @@ def usage_from_fireworks(usage: dict | None, headers: dict | None = None) -> dic
 
 def session_key_for_task(task_id: str) -> str:
     return f"dpe-{task_id}"
+
+
+def session_key_for_run() -> str:
+    """One sticky key for the whole Fireworks-direct run so the pad stays on one replica."""
+    return DEFAULT_SESSION
 
 
 def estimate_cost(

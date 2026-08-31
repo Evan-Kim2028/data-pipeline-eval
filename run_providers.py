@@ -432,12 +432,26 @@ def _attach_fail_mode(row: dict, hops: list[dict] | None = None) -> dict:
     return row
 
 
-def _complete(message: str, provider: str, *, task: str, require_parameters: bool = False) -> tuple[str, dict]:
+def _complete(
+    message: str,
+    provider: str,
+    *,
+    task: str,
+    require_parameters: bool = False,
+    fireworks_pad_chars: int | None = None,
+    fireworks_session: str | None = None,
+) -> tuple[str, dict]:
     if provider == fireworks_direct.PROVIDER:
         key = os.environ.get("FIREWORKS_API_KEY", "")
         if not key:
             raise SystemExit("FIREWORKS_API_KEY is not set")
-        session = fireworks_direct.session_key_for_task(task)
+        pad_chars = (
+            fireworks_direct.DEFAULT_PAD_CHARS
+            if fireworks_pad_chars is None
+            else fireworks_pad_chars
+        )
+        session = fireworks_session or fireworks_direct.session_key_for_run()
+        message = fireworks_direct.prefixed_message(message, pad_chars)
         body = fireworks_direct.request_body(
             message,
             session_key=session,
@@ -761,7 +775,15 @@ def _run_pair(
         with SEM_LOCK:
             sem = PROVIDER_SEMS.setdefault(provider, threading.Semaphore(PER_PROVIDER))
         with sem:
-            raw, meta = _complete(message, provider, task=task)
+            raw, meta = _complete(
+                message,
+                provider,
+                task=task,
+                fireworks_pad_chars=run_meta.get("fireworks_pad_chars"),
+                fireworks_session=run_meta.get("fireworks_session"),
+            )
+        row["fireworks_pad_chars"] = run_meta.get("fireworks_pad_chars")
+        row["fireworks_session"] = run_meta.get("fireworks_session")
         host_name = meta.get("provider")
         row.update(meta)
         row["provider"] = provider
@@ -1152,6 +1174,17 @@ def main() -> int:
         help="Comma-separated hosts. fireworks-direct calls api.fireworks.ai (needs FIREWORKS_API_KEY).",
     )
     ap.add_argument(
+        "--fireworks-pad-chars",
+        type=int,
+        default=fireworks_direct.DEFAULT_PAD_CHARS,
+        help="Shared prefix length for fireworks-direct so official prompts clear the cache floor.",
+    )
+    ap.add_argument(
+        "--fireworks-session",
+        default=fireworks_direct.DEFAULT_SESSION,
+        help="Sticky routing key for fireworks-direct (prompt_cache_key and x-session-affinity).",
+    )
+    ap.add_argument(
         "--jobs",
         type=int,
         default=0,
@@ -1298,7 +1331,10 @@ def main() -> int:
         "k": args.k,
         "benchmark_repo_sha": published,
         "environment_sha256": environment_digest(ROOT),
-        "comparable": not dirty,
+        "comparable": not dirty
+        and not (needs_fireworks and args.fireworks_pad_chars > 0),
+        "fireworks_pad_chars": args.fireworks_pad_chars if needs_fireworks else 0,
+        "fireworks_session": args.fireworks_session if needs_fireworks else None,
     }
     if args.continue_run and rows:
         first = rows[0]
