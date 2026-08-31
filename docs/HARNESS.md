@@ -21,6 +21,10 @@ They leave tests, gold files, and task mechanisms unnamed.
 `python run_providers.py --check-prompts` reprints SHA-256 digests.
 Changing that instruction sentence starts a new prompt campaign.
 
+`python scripts/score_cot.py logs/runs/<id>.jsonl` scores hop-0
+against the gold/trap lexemes in `docs/solutions` and the last
+mechanism claim against the applied hunk. Gold text stays offline.
+
 Hop-trace fail modes (`logic_trace.cot_fail_mode`) fold hop lists
 plus trial quality. The tokens are `pass`, `apply_fail`,
 `overthink`, `short_wrong`, and `no_response`. Pass means shown
@@ -65,6 +69,25 @@ Already-written pairs are skipped.
 `logs/LAST_RUN.md` is the latest table. A copy is also written to
 `logs/runs/<run_id>/LAST_RUN.md`. The jsonl for that run is
 rewritten in catalog task order, then provider, then trial.
+
+OpenRouter does not surface Fireworks prefix-cache hits. Call
+`https://api.fireworks.ai/inference/v1/chat/completions` directly
+with `accounts/fireworks/models/glm-5p3-flash`. Send the same
+session id as JSON `prompt_cache_key` / `user` and as the
+`x-session-affinity` header. Hits show up on
+`fireworks-cached-prompt-tokens` and
+`usage.prompt_tokens_details.cached_tokens`. Official candidate
+messages are 400-575 tokens and stay at `cached_tokens=0`. A
+stable prefix of about 1k tokens starts reporting hits, usually
+in 640-token steps. Probe with
+`FIREWORKS_API_KEY=... python scripts/probe_fireworks_cache.py`.
+`fireworks-direct` prepends a 16k-character shared pad and pins one
+session key so the nine-task variance can hit the Fireworks prefix
+cache. Official OpenRouter bodies stay unpadded.
+
+```sh
+FIREWORKS_API_KEY=fw_... python run_providers.py --spend --variance -k 1 --providers fireworks-direct --jobs 1
+```
 
 Official campaigns:
 
